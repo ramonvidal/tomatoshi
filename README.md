@@ -6,6 +6,19 @@ around it. First home: a living room. Next: the kitchen.
 
 See [PLAN.md](./PLAN.md) for the design, decisions and milestones.
 
+## Playing with it
+
+| Do this | It does this |
+|---|---|
+| Tap it | Glares at you, `!` or `…` |
+| Tap it fast, again and again | Tries not to laugh… then loses it `#@%!` and storms off |
+| Rub it | Looks away, blushes, a `♥` slips out and is quickly covered up |
+| Press and hold | Gets squished `💢`, pops back when you let go |
+| Poke the stem | Stem wobbles `💢` |
+| Drag it | Picked up, legs kicking; drop it anywhere on the floor |
+| Fling it | Flies, bounces, rolls, gets dizzy, then furious |
+| Leave it alone | Wanders, mutters, glares at you; sulks if ignored too long |
+
 ## Development
 
 ```sh

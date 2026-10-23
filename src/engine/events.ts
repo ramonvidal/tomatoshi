@@ -1,6 +1,9 @@
 // Central event bus. Every action in the world goes through here so that
 // future systems (puzzles, triggers, sounds) can listen without coupling.
 
+import type { Gesture } from "./input";
+import type { Reaction } from "../friend/Tomatoshi";
+
 export type Listener<T> = (payload: T) => void;
 
 export class EventBus<Events extends Record<string, unknown>> {
@@ -31,5 +34,6 @@ export class EventBus<Events extends Record<string, unknown>> {
 /** Events known to the game. Grows as features are added. */
 export type GameEvents = {
   "loop.tick": { dt: number; time: number };
-  "stage.resized": { scale: number };
+  "input.gesture": Gesture;
+  "friend.reaction": { reaction: Reaction };
 };

@@ -17,6 +17,8 @@ things around it. The world it lives in can change — we start in a
 | Screen | **Phone portrait** (9:16 stage), letterboxed on wider screens. |
 | Game type | **Pure toy** for now, built so it can become a **puzzle game** later (see §6). |
 | Environments | Living room → **kitchen** → (later) more. |
+| Autonomy | **Alive in the space**: it roams, picks what to do and (from M5) moves between rooms on its own. |
+| Sound | **None for now.** Everything is readable visually; sound may come later. |
 
 ---
 
@@ -179,8 +181,8 @@ We build a toy now, but avoid choices that would block a puzzle game:
   all screens. Revisit Canvas/PixiJS only if performance requires.
 - **Pointer Events API** for unified touch/mouse/pen input, with a small
   gesture recognizer (tap, multi-tap, stroke, long-press, drag, flick).
-- **Web Audio** for small sound effects (grumbles, squeaks, boing), enabled
-  after the first user gesture (browser autoplay rules).
+- **No sound** for now. If added later: Web Audio, enabled after the first
+  user gesture (browser autoplay rules).
 - **localStorage** for persistence. No backend.
 - **Vitest** for unit tests of the brain, needs, events and gesture recognizer.
 - Later: PWA manifest so it can be installed on a phone home screen.
@@ -221,11 +223,13 @@ tomatoshi/
 - Vite + TS project, 9:16 portrait stage, game loop, event bus, CI.
 - Placeholder living room and a static Tomatoshi.
 
-**M1 — A tomato that's alive (and grumpy)**
+**M1 — A tomato that's alive (and grumpy)** ✅
 - Idle breathing, blinking, eyes following your finger.
 - Wander around the floor.
-- Touch: tap, tickle, stroke, drag & drop, with grumpy reactions.
+- Touch: tap, tickle, stroke, long press, stem poke, drag & drop, flick,
+  with grumpy reactions.
 - Speech bubbles with symbol icons.
+- Simple autonomous life: idle, look around, wander, mutter, glare, sulk when ignored.
 
 **M2 — The living room**
 - Scene loader + living-room scene from data.
@@ -239,11 +243,11 @@ tomatoshi/
 - Persist state between visits.
 
 **M4 — Polish**
-- Sounds, particles (hearts, steam from anger, Zzz, sweat drops), transitions.
+- Particles (hearts, steam from anger, Zzz, sweat drops), transitions.
 - Radio, TV, plant. PWA install.
 
 **M5 — The kitchen**
-- Door/exit system + kitchen scene.
+- Door/exit system + kitchen scene; Tomatoshi wanders between rooms by itself.
 - Kitchen objects (knife block, fridge, sink, stove, salad bowl).
 - Tomatoshi remembers which room it's in.
 
@@ -255,5 +259,5 @@ tomatoshi/
 
 ## 9. Open questions
 
-- Sound: real recorded grumbles, synthesized blips, or silent by default?
-- Should Tomatoshi ever leave the room on its own, or only when you lead it?
+- When Tomatoshi is in another room, does the view follow it, or do you stay
+  and see it leave (and maybe peek back in)?

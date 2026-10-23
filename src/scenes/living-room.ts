@@ -2,9 +2,13 @@
 // props in M2; for now this is just the backdrop.
 
 import { STAGE_HEIGHT, STAGE_WIDTH, svgEl } from "../engine/stage";
+import type { Area } from "../friend/brain";
 import { palette as c } from "../palette";
 
 export const FLOOR_Y = 820;
+
+/** Where Tomatoshi's feet can be. Keeps its whole body on screen. */
+export const WALK_AREA: Area = { minX: 120, maxX: 600, minY: 900, maxY: 1200 };
 
 /** How far the backdrop extends past the stage to fill taller/wider screens. */
 const BLEED = 1200;
