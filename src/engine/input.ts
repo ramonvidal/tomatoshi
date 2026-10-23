@@ -7,7 +7,8 @@
 
 import type { Stage } from "./stage";
 
-export type Target = "body" | "stem" | "none";
+/** What was pressed: part of Tomatoshi, a room object, or empty space. */
+export type Target = "body" | "stem" | "none" | `prop:${string}`;
 
 export type Gesture =
   | { type: "tap"; target: Target; x: number; y: number; count: number }
@@ -17,8 +18,8 @@ export type Gesture =
   | { type: "stroke"; target: Target; distance: number }
   | { type: "strokeEnd"; target: Target }
   | { type: "dragStart"; target: Target; x: number; y: number; startX: number; startY: number }
-  | { type: "dragMove"; x: number; y: number }
-  | { type: "dragEnd"; x: number; y: number; vx: number; vy: number };
+  | { type: "dragMove"; target: Target; x: number; y: number }
+  | { type: "dragEnd"; target: Target; x: number; y: number; vx: number; vy: number };
 
 /** Distances are in stage units, times in ms. */
 export const GESTURE = {
@@ -164,7 +165,7 @@ export class GestureRecognizer {
         this.emit({ type: "stroke", target: this.target, distance: step });
         return;
       case "drag":
-        this.emit({ type: "dragMove", x, y });
+        this.emit({ type: "dragMove", target: this.target, x, y });
         return;
     }
   }
@@ -192,7 +193,7 @@ export class GestureRecognizer {
         break;
       case "drag": {
         const { vx, vy } = this.velocity(t);
-        this.emit({ type: "dragEnd", x, y, vx, vy });
+        this.emit({ type: "dragEnd", target: this.target, x, y, vx, vy });
         break;
       }
     }
@@ -254,8 +255,12 @@ export class GestureRecognizer {
 export function targetOf(el: Element | null): Target {
   if (el?.closest(".tomatoshi .stem")) return "stem";
   if (el?.closest(".tomatoshi")) return "body";
-  return "none";
+  const prop = el?.closest<SVGElement>("[data-prop]")?.dataset.prop;
+  return prop ? `prop:${prop}` : "none";
 }
+
+export const propIdOf = (target: Target): string | null =>
+  target.startsWith("prop:") ? target.slice(5) : null;
 
 export interface PointerHandlers {
   recognizer: GestureRecognizer;

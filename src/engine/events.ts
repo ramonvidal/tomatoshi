@@ -2,7 +2,9 @@
 // future systems (puzzles, triggers, sounds) can listen without coupling.
 
 import type { Gesture } from "./input";
+import type { Value } from "./world";
 import type { Reaction } from "../friend/Tomatoshi";
+import type { PropEventKind } from "../objects/prop";
 
 export type Listener<T> = (payload: T) => void;
 
@@ -36,4 +38,6 @@ export type GameEvents = {
   "loop.tick": { dt: number; time: number };
   "input.gesture": Gesture;
   "friend.reaction": { reaction: Reaction };
+  "world.changed": { id: string; key: string; value: Value; previous: Value };
+  "prop.event": { id: string; kind: PropEventKind };
 };

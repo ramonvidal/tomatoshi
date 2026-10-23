@@ -2,14 +2,11 @@
 // injectable random source, so behavior is reproducible in tests.
 // M3 replaces the fixed weights with needs-driven utility scoring.
 
+import type { Area } from "../engine/area";
 import { between, weighted, type Rng } from "../engine/random";
+import type { Opportunity, UseAction } from "../objects/prop";
 
-export interface Area {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-}
+export type { Area };
 
 export type Activity =
   | { kind: "idle"; duration: number }
@@ -17,7 +14,8 @@ export type Activity =
   | { kind: "walk"; x: number; y: number }
   | { kind: "mutter"; symbol: "ellipsis" | "anger" | "question"; duration: number }
   | { kind: "glareAtYou"; duration: number }
-  | { kind: "sulk"; duration: number };
+  | { kind: "sulk"; duration: number }
+  | { kind: "use"; propId: string; action: UseAction; duration: number };
 
 export type ActivityKind = Activity["kind"];
 
@@ -28,6 +26,8 @@ export interface BrainContext {
   /** Seconds since the user last touched it. */
   idleFor: number;
   last: ActivityKind | null;
+  /** What the room's objects offer right now. */
+  opportunities: Opportunity[];
   rng: Rng;
 }
 
@@ -40,13 +40,16 @@ export function chooseActivity(ctx: BrainContext): Activity {
   const { rng } = ctx;
   const ignored = ctx.idleFor >= SULK_AFTER;
 
+  const useWeight = ctx.opportunities.reduce((sum, o) => sum + Math.max(0, o.weight), 0);
   const kind = weighted<ActivityKind>(rng, {
     idle: 3,
     lookAround: 2,
-    walk: ctx.last === "walk" ? 1.5 : 4,
+    walk: ctx.last === "walk" ? 1.5 : 3,
     mutter: 1,
     glareAtYou: 1,
     sulk: ignored && ctx.last !== "sulk" ? 6 : 0,
+    // Objects are more interesting than standing around, but not every time.
+    use: ctx.last === "use" ? useWeight * 0.4 : useWeight,
   });
 
   switch (kind) {
@@ -66,6 +69,27 @@ export function chooseActivity(ctx: BrainContext): Activity {
       return { kind, duration: between(rng, 1.5, 2.5) };
     case "sulk":
       return { kind, duration: between(rng, 4, 7) };
+    case "use": {
+      const options = Object.fromEntries(ctx.opportunities.map((o, i) => [String(i), o.weight]));
+      const o = ctx.opportunities[Number(weighted(rng, options))];
+      return { kind, propId: o.propId, action: o.action, duration: useDuration(o.action, rng) };
+    }
+  }
+}
+
+/** How long it keeps at it once there (seconds). */
+export function useDuration(action: UseAction, rng: Rng): number {
+  switch (action) {
+    case "sit":
+      return between(rng, 6, 12);
+    case "nap":
+      return between(rng, 20, 40);
+    case "kick":
+      return 0.7;
+    case "eat":
+      return 2.6;
+    case "inspect":
+      return 2.6;
   }
 }
 
@@ -95,8 +119,3 @@ export function awayFrom(fromX: number, { y, area, rng }: Pick<BrainContext, "y"
   const ty = Math.min(area.maxY, Math.max(area.minY, y + between(rng, -100, 100)));
   return { x, y: ty };
 }
-
-export const clampToArea = (area: Area, x: number, y: number) => ({
-  x: Math.min(area.maxX, Math.max(area.minX, x)),
-  y: Math.min(area.maxY, Math.max(area.minY, y)),
-});

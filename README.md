@@ -19,6 +19,18 @@ See [PLAN.md](./PLAN.md) for the design, decisions and milestones.
 | Fling it | Flies, bounces, rolls, gets dizzy, then furious |
 | Leave it alone | Wanders, mutters, glares at you; sulks if ignored too long |
 
+And the room:
+
+| Do this | It does this |
+|---|---|
+| Tap the snack bowl | Refills it; Tomatoshi rushes over and eats (grudgingly). Empty bowl? It glares at you |
+| Tap or fling the ball | Tomatoshi chases it and kicks it back. Hit it with the ball and it kicks back harder |
+| Tap the lamp | Light on/off. In the dark it goes to nap on the couch; light wakes it up, annoyed |
+| Tap the window | Opens/closes the curtains. The sky follows the real time of day |
+| Tap the couch | Bounces the cushions, and whoever is sitting on them |
+
+Add `?hour=22` to the URL to see the room at a different time of day.
+
 ## Development
 
 ```sh

@@ -9,7 +9,7 @@ describe("brain", () => {
     const run = () => {
       const rng = seededRng(7);
       return Array.from({ length: 20 }, () =>
-        chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, rng }),
+        chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities: [], rng }),
       );
     };
     expect(run()).toEqual(run());
@@ -30,7 +30,7 @@ describe("brain", () => {
   it("never sulks while someone is paying attention", () => {
     const rng = seededRng(3);
     for (let i = 0; i < 300; i++) {
-      const a = chooseActivity({ x: 300, y: 1000, area, idleFor: 5, last: null, rng });
+      const a = chooseActivity({ x: 300, y: 1000, area, idleFor: 5, last: null, opportunities: [], rng });
       expect(a.kind).not.toBe("sulk");
     }
   });
@@ -38,9 +38,32 @@ describe("brain", () => {
   it("mostly sulks when ignored", () => {
     const rng = seededRng(4);
     const kinds = Array.from({ length: 300 }, () =>
-      chooseActivity({ x: 300, y: 1000, area, idleFor: SULK_AFTER + 1, last: null, rng }).kind,
+      chooseActivity({ x: 300, y: 1000, area, idleFor: SULK_AFTER + 1, last: null, opportunities: [], rng }).kind,
     );
     expect(kinds.filter((k) => k === "sulk").length).toBeGreaterThan(100);
+  });
+
+  it("never uses objects when nothing is on offer", () => {
+    const rng = seededRng(6);
+    for (let i = 0; i < 300; i++) {
+      expect(chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities: [], rng }).kind).not.toBe("use");
+    }
+  });
+
+  it("picks objects in proportion to how much it wants them", () => {
+    const rng = seededRng(8);
+    const opportunities = [
+      { propId: "couch", action: "nap" as const, weight: 30 },
+      { propId: "ball", action: "kick" as const, weight: 0 },
+    ];
+    const picks = Array.from({ length: 300 }, () =>
+      chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities, rng }),
+    );
+    const uses = picks.filter((a) => a.kind === "use");
+    // A strong pull (like sleepiness in the dark) wins most of the time…
+    expect(uses.length).toBeGreaterThan(200);
+    // …and zero-weight options are never chosen.
+    expect(uses.every((a) => a.kind === "use" && a.propId === "couch" && a.action === "nap")).toBe(true);
   });
 
   it("storms off to the opposite side", () => {

@@ -1,15 +1,19 @@
 // Tomatoshi: position, physics, reactions to touch and autonomous life.
 //
 // Coordinates: (x, ground) is where its feet touch the floor; `h` is the
-// height above that point (when picked up or thrown). The shadow stays on
-// the ground, which is what makes height readable in a 2.5D room.
+// height above that point (when picked up, thrown, or sitting on the couch).
+// The shadow stays on the ground, which is what makes height readable in a
+// 2.5D room.
 
+import { depthScale } from "../engine/area";
 import { between, pick, type Rng } from "../engine/random";
 import type { Bounds, Gesture } from "../engine/input";
+import type { Surroundings } from "../engine/room";
+import { DARK, type Point, type PropEventKind, type UseAction } from "../objects/prop";
 import { BODY_CY, BODY_RX, BODY_RY, drawTomatoshi, HEAD_TOP, renderFace, type FaceState } from "./art";
 import { blendFace, expressions, type ExpressionName } from "./expressions";
 import { SpeechBubble, type BubbleSymbol } from "./bubbles";
-import { awayFrom, chooseActivity, type Activity, type ActivityKind, type Area } from "./brain";
+import { awayFrom, chooseActivity, useDuration, type Activity, type ActivityKind, type Area } from "./brain";
 
 export type Reaction =
   | "tapped"
@@ -23,10 +27,17 @@ export type Reaction =
   | "thrown"
   | "dropped"
   | "dizzy"
-  | "sulking";
+  | "sulking"
+  | "bonked"
+  | "fell-asleep"
+  | "woke-up"
+  | "ate"
+  | "kicked-ball"
+  | "found-bowl-empty";
 
 export interface TomatoshiOptions {
   area: Area;
+  room: Surroundings;
   x: number;
   y: number;
   rng: Rng;
@@ -47,6 +58,8 @@ const THROW_SPEED = 300;
 const DIZZY_SPEED = 1400;
 /** Keep the top of the stem at least this far below the top of the stage. */
 const CEILING = 40;
+/** Gives up walking to something after this long (seconds). */
+const APPROACH_TIMEOUT = 12;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const approach = (from: number, to: number, rate: number, dt: number) => to + (from - to) * Math.exp(-rate * dt);
@@ -98,12 +111,20 @@ export class Tomatoshi {
   private tickleExploded = false;
   private queuedBubble: { symbol: BubbleSymbol; at: number; duration: number } | null = null;
 
+  /** Sitting on something: the height of its surface above `ground`. */
+  private perch: { propId: string; height: number } | null = null;
+  /** Progress of a "use" activity: walking there, then doing it. */
+  private using = { phase: "approach" as "approach" | "act", time: 0, done: false };
+  private lastLight: number | null = null;
+
   private readonly area: Area;
+  private readonly room: Surroundings;
   private readonly rng: Rng;
   private readonly onReaction: (reaction: Reaction) => void;
 
   constructor(options: TomatoshiOptions) {
     this.area = options.area;
+    this.room = options.room;
     this.rng = options.rng;
     this.x = options.x;
     this.ground = options.y;
@@ -113,8 +134,21 @@ export class Tomatoshi {
 
   /** Stage units per body unit at the current depth (further away = smaller). */
   get depthScale(): number {
-    const t = (this.ground - this.area.minY) / (this.area.maxY - this.area.minY);
-    return 0.78 + clamp(t, 0, 1) * 0.27;
+    return depthScale(this.area, this.ground);
+  }
+
+  /** Things can bump into it, unless it's being held or flying. */
+  get solid(): boolean {
+    return this.mode !== "held" && this.mode !== "thrown";
+  }
+
+  get asleep(): boolean {
+    const a = this.activity;
+    return this.mode === "auto" && a?.kind === "use" && a.action === "nap" && this.using.phase === "act";
+  }
+
+  private get floorLevel(): number {
+    return this.perch?.height ?? 0;
   }
 
   // -------------------------------------------------------------------------
@@ -125,10 +159,20 @@ export class Tomatoshi {
     this.pointer = { x, y, seenAt: this.time };
   }
 
+  /** The user did something in the room (not to Tomatoshi directly). */
+  userActive(): void {
+    this.idleFor = 0;
+  }
+
   handle(g: Gesture): void {
     this.idleFor = 0;
     // While flying it can only be caught.
     if (this.mode === "thrown" && g.type !== "dragStart") return;
+    if (this.asleep) {
+      // Being woken up is the worst. A tap does nothing else.
+      this.wakeUp("angry");
+      if (g.type === "tap") return;
+    }
 
     switch (g.type) {
       case "tap":
@@ -212,7 +256,7 @@ export class Tomatoshi {
   }
 
   private noticed(): void {
-    if (this.mode !== "auto") return;
+    if (this.mode !== "auto" || this.asleep) return;
     if (this.activity?.kind === "sulk") {
       this.react("annoyed", 1);
       this.say("ellipsis", 1.2);
@@ -252,6 +296,7 @@ export class Tomatoshi {
   private pickedUp(grabX: number, grabY: number): void {
     this.mode = "held";
     this.activity = null;
+    this.perch = null;
     this.vx = 0;
     this.vh = 0;
     this.grab = { dx: grabX - this.x, dy: grabY - (this.ground - this.h), heldFor: 0, complained: false };
@@ -307,7 +352,7 @@ export class Tomatoshi {
   }
 
   private hop(speed: number): void {
-    if (this.h <= 0) this.vh = speed;
+    if (this.h <= this.floorLevel) this.vh = speed;
   }
 
   private stormOff(fromX: number): void {
@@ -320,6 +365,82 @@ export class Tomatoshi {
   private toAuto(): void {
     this.mode = "auto";
     this.activity = null;
+  }
+
+  /** Something happened to an object in the room. */
+  notice(propId: string, kind: PropEventKind): void {
+    const free = this.mode === "auto" && !this.asleep;
+    switch (kind) {
+      case "thrown":
+        // A moving ball is irresistible (it would never admit it).
+        if (free) {
+          this.say("exclaim", 0.9);
+          this.startUse(propId, "kick", 0.7);
+        }
+        break;
+      case "refilled":
+        if (free) {
+          this.say("exclaim", 0.9);
+          this.startUse(propId, "eat", 2.6);
+        }
+        break;
+      case "bounced":
+        if (this.perch?.propId === propId) {
+          if (this.asleep) this.wakeUp("angry");
+          else {
+            this.vh = 420; // bounced right off the cushion
+            this.say("anger", 1.2);
+            this.react("annoyed", 1.1);
+          }
+        }
+        break;
+      case "hit-friend":
+        this.bonked(propId);
+        break;
+    }
+  }
+
+  private bonked(propId: string): void {
+    this.squashV += 5;
+    this.stemV += 500;
+    this.shakeLeft = 0.3;
+    this.onReaction("bonked");
+    if (this.mode === "squished" || this.mode === "stroked") return;
+    this.perch = null;
+    this.say("grawlix", 1.5);
+    // Kicks it right back.
+    this.react("angry", 1, () => this.startUse(propId, "kick", 0.7));
+  }
+
+  private wakeUp(mood: "angry" | "annoyed"): void {
+    this.say("anger", 1.4);
+    this.onReaction("woke-up");
+    this.react(mood, 1.3);
+  }
+
+  private startUse(propId: string, action: UseAction, duration: number): void {
+    this.mode = "auto";
+    this.storming = false;
+    this.activity = { kind: "use", propId, action, duration };
+    this.activityTime = 0;
+    // Already sitting on it: no need to climb down and back up.
+    const settled = this.perch?.propId === propId && (action === "sit" || action === "nap");
+    this.using = { phase: settled ? "act" : "approach", time: 0, done: false };
+  }
+
+  /** Light changed across the sleepy threshold. */
+  private lightChanged(light: number): void {
+    const last = this.lastLight;
+    this.lastLight = light;
+    if (last === null) return;
+    if (light < DARK && last >= DARK && this.mode === "auto" && !this.asleep) {
+      // Who turned off the lights? …well, nap time.
+      this.say("question", 1.2);
+      const nap = this.room.opportunities().find((o) => o.action === "nap");
+      if (nap) this.startUse(nap.propId, "nap", useDuration("nap", this.rng));
+    } else if (light >= DARK && last < DARK && this.asleep) {
+      this.wakeUp("annoyed");
+    }
   }
 
   private landedFromThrow(): void {
@@ -347,6 +468,7 @@ export class Tomatoshi {
   update(dt: number): void {
     this.time += dt;
     this.idleFor += dt;
+    this.lightChanged(this.room.light());
 
     switch (this.mode) {
       case "auto":
@@ -390,30 +512,31 @@ export class Tomatoshi {
         area: this.area,
         idleFor: this.idleFor,
         last: this.lastActivity,
+        opportunities: this.room.opportunities(),
         rng: this.rng,
       });
       this.activityTime = 0;
+      this.using = { phase: "approach", time: 0, done: false };
       this.startActivity(this.activity);
     }
 
     const a = this.activity;
+
+    // Anything other than sitting here means getting down first.
+    const seated = a.kind === "use" && (a.action === "sit" || a.action === "nap") && this.using.phase === "act";
+    if (this.perch && !seated) {
+      this.perch = null;
+      this.vh = 300;
+    }
+    if (this.h > this.floorLevel || this.vh > 0) return; // mid-hop
+
     this.activityTime += dt;
     let done = false;
 
     if (a.kind === "walk") {
-      const dx = a.x - this.x;
-      const dy = a.y - this.ground;
-      const dist = Math.hypot(dx, dy);
-      const step = WALK_SPEED * (this.storming ? 1.8 : 1) * this.depthScale * dt;
-      this.walkPhase += dt * HOPS_PER_SECOND * (this.storming ? 1.6 : 1);
-      if (dist <= step) {
-        this.x = a.x;
-        this.ground = a.y;
-        done = true;
-      } else {
-        this.x += (dx / dist) * step;
-        this.ground += (dy / dist) * step;
-      }
+      done = this.walkToward(a, dt, this.storming ? 1.8 : 1);
+    } else if (a.kind === "use") {
+      done = this.updateUse(a, dt);
     } else {
       done = this.activityTime >= a.duration;
     }
@@ -422,10 +545,96 @@ export class Tomatoshi {
       this.lastActivity = a.kind;
       this.activity = null;
       this.storming = false;
-      if (a.kind === "walk") {
-        this.walkPhase = 0;
-        this.squashV += 1.5;
+    }
+  }
+
+  /** Step toward a point. Returns true on arrival. */
+  private walkToward(target: Point, dt: number, speed: number): boolean {
+    const dx = target.x - this.x;
+    const dy = target.y - this.ground;
+    const dist = Math.hypot(dx, dy);
+    const step = WALK_SPEED * speed * this.depthScale * dt;
+    this.walkPhase += dt * HOPS_PER_SECOND * Math.sqrt(speed);
+    if (dist <= step) {
+      this.x = target.x;
+      this.ground = target.y;
+      this.walkPhase = 0;
+      this.squashV += 1.5;
+      return true;
+    }
+    this.x += (dx / dist) * step;
+    this.ground += (dy / dist) * step;
+    return false;
+  }
+
+  /** Walk to an object, then use it. Returns true when finished. */
+  private updateUse(a: Extract<Activity, { kind: "use" }>, dt: number): boolean {
+    const u = this.using;
+
+    if (u.phase === "approach") {
+      const spot = this.room.spot(a.propId, a.action, { x: this.x, y: this.ground });
+      if (!spot || this.activityTime > APPROACH_TIMEOUT) return true;
+      const chasing = a.action === "kick";
+      if (!this.walkToward(spot, dt, chasing ? 1.6 : 1)) return false;
+      u.phase = "act";
+      u.time = 0;
+      this.beginUse(a);
+      return false;
+    }
+
+    u.time += dt;
+    switch (a.action) {
+      case "nap":
+        if (u.time % 3.2 < dt) this.say("zzz", 2.4);
+        break;
+      case "eat":
+        if (Math.floor(u.time * 7) !== Math.floor((u.time - dt) * 7)) this.squashV += 0.8; // chomp
+        if (u.time >= 1.2 && !u.done) {
+          u.done = true;
+          this.room.use(a.propId, "eat", { x: this.x, y: this.ground });
+          this.onReaction("ate");
+        }
+        break;
+      case "inspect":
+        if (u.time >= 1.1 && !u.done) {
+          // Empty. Whose fault is that?
+          u.done = true;
+          this.say("anger", 1.4);
+          this.onReaction("found-bowl-empty");
+        }
+        break;
+    }
+
+    if (u.time < a.duration) return false;
+    if (a.action === "eat") {
+      // Tasty. Not that it would say so.
+      this.react("secretlyHappy", 0.8, () => {
+        this.say("ellipsis", 1.2);
+        this.toAuto();
+      });
+    }
+    return true;
+  }
+
+  private beginUse(a: Extract<Activity, { kind: "use" }>): void {
+    switch (a.action) {
+      case "sit":
+      case "nap": {
+        const height = this.room.seatHeight(a.propId);
+        this.perch = { propId: a.propId, height };
+        this.vh = Math.sqrt(2 * GRAVITY * (height + 40));
+        if (a.action === "nap") {
+          this.queuedBubble = { symbol: "zzz", at: this.time + 1, duration: 2.4 };
+          this.onReaction("fell-asleep");
+        }
+        break;
       }
+      case "kick":
+        this.room.use(a.propId, "kick", { x: this.x, y: this.ground });
+        this.squashV += 3;
+        this.vh = 220;
+        this.onReaction("kicked-ball");
+        break;
     }
   }
 
@@ -446,7 +655,11 @@ export class Tomatoshi {
 
   private updatePhysics(dt: number): void {
     // Walking hop is purely visual.
-    const walking = this.mode === "auto" && this.activity?.kind === "walk";
+    const a = this.activity;
+    const walking =
+      this.mode === "auto" &&
+      this.h <= this.floorLevel &&
+      (a?.kind === "walk" || (a?.kind === "use" && this.using.phase === "approach"));
     this.bounce = walking ? Math.abs(Math.sin(this.walkPhase * Math.PI)) * (this.storming ? 22 : 16) : 0;
 
     if (this.mode === "held") {
@@ -454,13 +667,14 @@ export class Tomatoshi {
       return;
     }
 
-    if (this.h > 0 || this.vh > 0) {
+    const floor = this.floorLevel;
+    if (this.h > floor || this.vh > 0) {
       this.vh -= GRAVITY * dt;
       this.h += this.vh * dt;
       if (this.mode === "thrown") this.rot += this.vx * dt * 0.15;
-      if (this.h <= 0) {
+      if (this.h <= floor && this.vh < 0) {
         const impact = -this.vh;
-        this.h = 0;
+        this.h = floor;
         this.vh = 0;
         this.squashV += impact * 0.006;
         if (this.mode === "thrown") {
@@ -521,11 +735,18 @@ export class Tomatoshi {
         return "squished";
       case "stroked":
         return this.strokeAmount > STROKE_HEART * 0.6 ? "secretlyHappy" : "flustered";
-      case "auto":
+      case "auto": {
+        const a = this.activity;
         if (this.storming) return "annoyed";
-        if (this.activity?.kind === "sulk") return "sulky";
-        if (this.activity?.kind === "glareAtYou") return "annoyed";
+        if (a?.kind === "sulk") return "sulky";
+        if (a?.kind === "glareAtYou") return "annoyed";
+        if (a?.kind === "use" && this.using.phase === "act") {
+          if (a.action === "nap") return "asleep";
+          if (a.action === "eat") return Math.floor(this.using.time * 7) % 2 ? "chompOpen" : "chompShut";
+          if (a.action === "inspect") return this.using.done ? "annoyed" : "sulky";
+        }
         return "grumpy";
+      }
     }
   }
 
@@ -538,9 +759,16 @@ export class Tomatoshi {
 
     if (this.mode === "stroked") return { x: towardPointer.x > 0 ? -0.9 : 0.9, y: 0.35 };
     if (this.mode === "react" && this.reactExpression === "dizzy") return { x: 0, y: 0 };
+    if (this.asleep) return { x: 0, y: 0.3 };
     if (this.time - this.pointer.seenAt < POINTER_ATTENTION) return towardPointer;
 
     const a = this.activity;
+    if (this.mode === "auto" && a?.kind === "use") {
+      if (a.action === "nap" && this.using.phase === "act") return { x: 0, y: 0.3 };
+      if (a.action === "inspect" && this.using.done) return { x: 0, y: 0.1 }; // at you
+      const focus = this.room.focus(a.propId);
+      if (focus) return { x: clamp((focus.x - this.x) / 200, -1, 1), y: clamp((focus.y - headY) / 250, -1, 1) };
+    }
     if (this.mode === "auto" && a) {
       if (a.kind === "walk") return { x: Math.sign(a.x - this.x) * 0.8, y: 0.15 };
       if (a.kind === "glareAtYou") return { x: 0, y: 0.1 };
@@ -602,10 +830,13 @@ export class Tomatoshi {
       "transform",
       `translate(${this.x.toFixed(1)} ${(this.ground - lift).toFixed(1)}) scale(${s.toFixed(3)}) rotate(${this.rot.toFixed(1)} 0 ${BODY_CY})`,
     );
-    const shadowScale = s / (1 + lift / 250);
-    p.shadow.setAttribute("transform", `translate(${this.x.toFixed(1)} ${this.ground.toFixed(1)}) scale(${shadowScale.toFixed(3)})`);
+    // When sitting on something the shadow falls on its surface.
+    const surface = this.ground - this.floorLevel;
+    const shadowScale = s / (1 + (lift - this.floorLevel) / 250);
+    p.shadow.setAttribute("transform", `translate(${this.x.toFixed(1)} ${surface.toFixed(1)}) scale(${shadowScale.toFixed(3)})`);
 
-    const breath = Math.sin(this.time * (this.activity?.kind === "sulk" ? 1.4 : 2.4)) * 0.02;
+    const slow = this.asleep || this.activity?.kind === "sulk";
+    const breath = Math.sin(this.time * (slow ? 1.4 : 2.4)) * (this.asleep ? 0.035 : 0.02);
     const sy = 1 - this.squash + breath;
     const sx = 1 + this.squash * 0.8 - breath * 0.5;
     const shake = this.shakeLeft > 0 ? Math.sin(this.time * 70) * 5 : 0;

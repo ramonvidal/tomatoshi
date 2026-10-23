@@ -23,6 +23,10 @@ export const expressions = {
   dizzy: { lid: 0, brow: -0.6, browLift: 4, blush: 0, eyes: "spiral", mouth: "squiggle" },
   /** Sulking when ignored. */
   sulky: { lid: 0.6, brow: -0.3, browLift: 0, blush: 0, eyes: "open", mouth: "frown" },
+  asleep: { lid: 1, brow: 0, browLift: 0, blush: 0, eyes: "open", mouth: "flat" },
+  /** Eating alternates these two. Enjoying it a little too visibly. */
+  chompOpen: { lid: 0.6, brow: 0.2, browLift: 0, blush: 0.4, eyes: "open", mouth: "open" },
+  chompShut: { lid: 0.6, brow: 0.2, browLift: 0, blush: 0.4, eyes: "open", mouth: "flat" },
 } satisfies Record<string, Expression>;
 
 export type ExpressionName = keyof typeof expressions;

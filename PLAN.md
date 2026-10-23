@@ -18,6 +18,7 @@ things around it. The world it lives in can change — we start in a
 | Game type | **Pure toy** for now, built so it can become a **puzzle game** later (see §6). |
 | Environments | Living room → **kitchen** → (later) more. |
 | Autonomy | **Alive in the space**: it roams, picks what to do and (from M5) moves between rooms on its own. |
+| Changing rooms | The view **stays put** and you watch Tomatoshi leave (and maybe peek back in). Tapping the door follows it into the next room. |
 | Sound | **None for now.** Everything is readable visually; sound may come later. |
 
 ---
@@ -231,10 +232,12 @@ tomatoshi/
 - Speech bubbles with symbol icons.
 - Simple autonomous life: idle, look around, wander, mutter, glare, sulk when ignored.
 
-**M2 — The living room**
+**M2 — The living room** ✅
 - Scene loader + living-room scene from data.
-- Objects: couch, lamp, ball, snack bowl. User can interact with each.
-- Day/night via the window, lamp-driven lighting.
+- Objects: couch, lamp, ball, snack bowl, window with curtains. User can
+  interact with each; Tomatoshi uses them on its own and reacts to changes.
+- Day/night via the window (real clock, `?hour=` to override), lamp-driven
+  lighting; it naps when the room gets dark.
 - World state store (puzzle-ready).
 
 **M3 — A mind of its own**
@@ -259,5 +262,5 @@ tomatoshi/
 
 ## 9. Open questions
 
-- When Tomatoshi is in another room, does the view follow it, or do you stay
-  and see it leave (and maybe peek back in)?
+- When you follow Tomatoshi into another room, can you also go back on your
+  own (tap the door again), leaving it there?

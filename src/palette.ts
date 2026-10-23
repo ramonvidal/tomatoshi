@@ -24,5 +24,22 @@ export const palette = {
   couchDark: "#6a9d92",
   shadow: "rgba(59, 42, 42, 0.15)",
 
+  curtain: "#e48b7a",
+  curtainDark: "#cf7666",
+  sun: "#ffd166",
+  moon: "#fff3c4",
+  star: "#fffaf3",
+  lampMetal: "#5e5a6e",
+  lampShade: "#f2c879",
+  lampShadeLit: "#ffe7a3",
+  bulb: "#fff6d5",
+  ball: "#5b8def",
+  ballStripe: "#fffaf3",
+  bowl: "#7fa7d6",
+  bowlDark: "#6a92c2",
+  bowlInside: "#4f7aab",
+  snack: "#e0a458",
+  snackDark: "#c98b3f",
+
   letterbox: "#2e2626",
 } as const;
