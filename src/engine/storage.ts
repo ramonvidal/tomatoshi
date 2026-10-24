@@ -53,12 +53,12 @@ export function parseSave(raw: string | null): SaveData | null {
     return null;
   }
   if (!isRecord(data) || data.version !== 1 || !isFiniteNumber(data.savedAt) || !isRecord(data.friend)) return null;
-  const { x, y } = data.friend;
+  const { x, y, room } = data.friend;
   if (!isFiniteNumber(x) || !isFiniteNumber(y)) return null;
   return {
     version: 1,
     savedAt: data.savedAt,
-    friend: { needs: parseNeeds(data.friend.needs), x, y },
+    friend: { needs: parseNeeds(data.friend.needs), x, y, ...(typeof room === "string" ? { room } : {}) },
     world: parseWorld(data.world),
   };
 }

@@ -32,6 +32,24 @@ And the room:
 | Tap the TV | Changes channel: color bars (it watches), static (it grumbles), a cooking show with a knife (it flees) |
 | Tap the plant | Waters its tomato cousins, the only ones it's nice to. Let them go thirsty and it glares at you |
 
+### The kitchen
+
+Tap the door (top right of the living room) to look into the kitchen.
+Tomatoshi stays where it is, but it wanders between rooms by itself, comes to
+find you if you're gone a while (it would never admit it), and sometimes peeks
+back in after leaving. Tap the kitchen door to go back.
+
+| Do this | It does this |
+|---|---|
+| Tap the fridge | Opens it: cold air (it hates that) and snacks (it loves those). Hungry and the fridge is shut? It glares at you |
+| Tap the sink | Runs the water. It takes baths in the sink: annoyed at first, then `♪` |
+| Tap the stove | Lights the burners. Far too hot to go near |
+| Tap the knife block | Rattles the knives. Why would you do that |
+| Tap the vegetable crate | The onion stings: anyone nearby starts crying |
+| Tap the ceiling light | Light on/off |
+
+It won't go near the knives or the salad bowl (it has tomato slices in it).
+
 ### Its needs
 
 Tomatoshi has four needs that slowly drop: **energy**, **fun**, **fullness**

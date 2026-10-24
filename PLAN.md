@@ -258,11 +258,17 @@ tomatoshi/
   they're thirsty).
 - Installable PWA with icons, works offline.
 
-**M5 — The kitchen**
+**M5 — The kitchen** ✅
 - Door/exit system + kitchen scene; Tomatoshi wanders between rooms by itself.
 - The view stays in the current room; tapping a door moves the view through it
   (following Tomatoshi, or going back without it).
-- Kitchen objects (knife block, fridge, sink, stove, salad bowl).
+- Kitchen objects: knife block (terrified), fridge (cold, but has snacks;
+  glares when it's shut), sink (a bath it pretends not to enjoy), stove (too
+  hot), salad bowl (offensive), vegetable crate (neighbors to grumble at; the
+  onion makes it cry), ceiling light, small window.
+- Danger zones it avoids and reacts to; it won't pick walk targets inside them.
+- It comes looking for you when you've been in another room a while, or
+  leaves when what it needs isn't in this room; sometimes peeks back in.
 - Tomatoshi remembers which room it's in.
 
 **Later — Puzzle mode**

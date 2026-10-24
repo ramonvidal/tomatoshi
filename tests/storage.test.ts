@@ -32,6 +32,13 @@ describe("storage", () => {
     expect(loadSave(storage)).toEqual(valid);
   });
 
+  it("remembers which room it was in, and ignores a non-text room", () => {
+    const withRoom = { ...valid, friend: { ...valid.friend, room: "kitchen" } };
+    expect(parseSave(JSON.stringify(withRoom))?.friend.room).toBe("kitchen");
+    const badRoom = { ...valid, friend: { ...valid.friend, room: 42 } };
+    expect(parseSave(JSON.stringify(badRoom))?.friend).not.toHaveProperty("room");
+  });
+
   it("rejects garbage, wrong versions and missing fields", () => {
     expect(parseSave(null)).toBeNull();
     expect(parseSave("not json")).toBeNull();

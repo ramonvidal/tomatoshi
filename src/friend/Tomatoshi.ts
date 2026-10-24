@@ -9,9 +9,9 @@ import { depthScale } from "../engine/area";
 import { between, pick, type Rng } from "../engine/random";
 import type { Bounds, Gesture } from "../engine/input";
 import type { Effects, ParticleKind } from "../engine/particles";
-import type { Surroundings } from "../engine/room";
+import { inDanger, type Surroundings } from "../engine/room";
 import { THIRSTY } from "../objects/plant";
-import { DARK, type Point, type PropEventKind, type UseAction } from "../objects/prop";
+import { DARK, type DangerKind, type Opportunity, type Point, type PropEventKind, type UseAction } from "../objects/prop";
 import { CHANNEL } from "../objects/tv";
 import { BODY_CY, BODY_RX, BODY_RY, drawTomatoshi, HEAD_TOP, renderFace, type FaceState } from "./art";
 import { blendFace, expressions, type ExpressionName } from "./expressions";
@@ -40,7 +40,14 @@ export type Reaction =
   | "found-bowl-empty"
   | "caught-dancing"
   | "visited-cousin"
-  | "scared";
+  | "scared"
+  | "grumbled"
+  | "bathed"
+  | "too-hot"
+  | "too-cold"
+  | "offended"
+  | "cried"
+  | "came-looking";
 
 /** How each reaction changes its needs. Rough handling costs affection. */
 const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
@@ -61,9 +68,23 @@ const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
   "caught-dancing": { fun: 5 },
   "visited-cousin": { affection: 10 },
   "scared": { affection: -2 },
+  grumbled: { fun: 8 },
+  "too-hot": { affection: -1 },
+  offended: { affection: -1 },
+  cried: { affection: -2 },
 };
 /** Fun per second from things it enjoys (and would deny enjoying). */
-const FUN_RATE = { dance: 2, tv: 1.2, staticTv: 0.3 };
+const FUN_RATE = { dance: 2, tv: 1.2, staticTv: 0.3, bath: 1.8 };
+/** Door weights: a little curiosity, more when it misses you or needs something not found here. */
+const DOOR_CURIOSITY = 0.25;
+const DOOR_MISSING_YOU = 2.5;
+const DOOR_NEED = 3;
+/** Seconds apart before it comes looking for you (pretending it isn't). */
+const MISSES_YOU_AFTER = 15;
+/** Seconds for walking through a door. */
+const DOOR_TIME = 0.7;
+/** Seconds before reacting to the same danger again. */
+const DANGER_COOLDOWN = 8;
 /** Don't dance while someone touched the screen this recently (seconds). */
 const DANCE_SHYNESS = 4;
 /** Affection per stage unit of stroking (less as affection gets high). */
@@ -74,11 +95,14 @@ export interface FriendSave {
   needs: Needs;
   x: number;
   y: number;
+  /** The room it was in. */
+  room?: string;
 }
 
 export interface TomatoshiOptions {
-  area: Area;
   room: Surroundings;
+  /** Called when it walks out through a door. */
+  travel?: (doorId: string) => void;
   needs?: Needs;
   /** Where to spawn particle effects. */
   fx?: Effects;
@@ -187,8 +211,15 @@ export class Tomatoshi {
   // Stem posture follows mood: perky, normal, spiky or droopy.
   private stemPose = { sx: 1, sy: 1, dy: 0 };
 
-  private readonly area: Area;
-  private readonly room: Surroundings;
+  /** The room it's in. Changes when it goes through a door. */
+  room: Surroundings;
+  /** 0 = invisible (inside a doorway), 1 = fully here. */
+  private presence = 1;
+  private arrivedFromLooking = false;
+  private apartFor = 0;
+  private viewer = "";
+  private dangerSeen = new Map<string, number>();
+  private readonly travel: (doorId: string) => void;
   private readonly rng: Rng;
   private readonly onReaction: (reaction: Reaction) => void;
 
@@ -218,8 +249,9 @@ export class Tomatoshi {
   }
 
   constructor(options: TomatoshiOptions) {
-    this.area = options.area;
     this.room = options.room;
+    this.travel = options.travel ?? (() => {});
+    this.viewer = options.room.id;
     this.rng = options.rng;
     this.x = options.x;
     this.ground = options.y;
@@ -227,6 +259,51 @@ export class Tomatoshi {
     this.needs = { ...(options.needs ?? DEFAULT_NEEDS) };
     this.fx = options.fx ?? (() => {});
     this.blinkTimer = between(this.rng, 1, 4);
+  }
+
+  private get area(): Area {
+    return this.room.walkArea;
+  }
+
+  /** The room you're looking at. It notices when you come and go. */
+  get viewerRoom(): string {
+    return this.viewer;
+  }
+
+  set viewerRoom(id: string) {
+    const before = this.viewer;
+    this.viewer = id;
+    if (before === id) return;
+    const free = this.mode === "auto" && !this.asleep;
+    if (id === this.room.id && free) {
+      this.say("ellipsis", 1.2); // oh. it's you.
+    } else if (before === this.room.id && free) {
+      this.say("question", 1); // where are you going?
+    }
+  }
+
+  /** Walk in through a door of another room. */
+  enter(room: Surroundings, at: Point): void {
+    this.room = room;
+    this.x = at.x;
+    this.ground = at.y - 30;
+    this.h = 0;
+    this.vh = 0;
+    this.vx = 0;
+    this.perch = null;
+    this.presence = 0;
+    this.lastLight = null;
+    this.mode = "auto";
+    this.storming = false;
+    this.activity = { kind: "walk", x: at.x, y: Math.min(this.area.maxY, at.y + 70) };
+    this.activityTime = 0;
+    this.lastActivity = "walk";
+    // Came here because you were here? It would never admit it.
+    if (room.id === this.viewer && this.arrivedFromLooking) {
+      this.queuedBubble = { symbol: "ellipsis", at: this.time + 0.8, duration: 1.4 };
+      this.reacted("came-looking");
+    }
+    this.arrivedFromLooking = false;
   }
 
   /** Stage units per body unit at the current depth (further away = smaller). */
@@ -258,7 +335,7 @@ export class Tomatoshi {
   }
 
   save(): FriendSave {
-    return { needs: { ...this.needs }, x: this.x, y: this.ground };
+    return { needs: { ...this.needs }, x: this.x, y: this.ground, room: this.room.id };
   }
 
   /**
@@ -280,6 +357,11 @@ export class Tomatoshi {
       this.say("ellipsis", 1.6);
       this.react("annoyed", 1.2);
     }
+  }
+
+  get bathing(): boolean {
+    const a = this.activity;
+    return this.mode === "auto" && a?.kind === "use" && a.action === "bathe" && this.using.phase === "act";
   }
 
   get asleep(): boolean {
@@ -553,10 +635,76 @@ export class Tomatoshi {
       case "hit-friend":
         this.bonked(propId);
         break;
+      case "splashed":
+        if (this.bathing && this.perch?.propId === propId) {
+          this.squashV += 3;
+          this.say("anger", 1.1); // hey!
+        }
+        break;
+      case "rattled":
+        // The knives. Rattling. On purpose.
+        if (this.room.dangers().some((d) => d.propId === propId && d.danger.kind === "sharp") && this.solid && !this.asleep) {
+          this.shakeLeft = 0.6;
+          this.burst("sweat", 2);
+          this.say("exclaim", 1);
+          if (this.mode === "auto") this.react("surprised", 0.8);
+        }
+        break;
       case "channel":
         // A cooking show. With knives. Absolutely not.
         if (this.room.state(propId)?.channel === CHANNEL.cooking && !this.asleep && this.solid) this.scared(propId);
         break;
+    }
+  }
+
+  /** Wandered too close to something unpleasant. */
+  private avoid(propId: string, kind: DangerKind, fromX: number): void {
+    this.dangerSeen.set(propId, this.time);
+    switch (kind) {
+      case "sharp":
+        this.scared(propId);
+        return;
+      case "hot":
+        this.burst("sweat", 3);
+        this.say("exclaim", 1);
+        this.hop(300);
+        this.reacted("too-hot");
+        this.react("surprised", 0.6, () => this.stormOff(fromX));
+        return;
+      case "cold":
+        this.shakeLeft = 0.8;
+        this.say("ellipsis", 1.2);
+        this.reacted("too-cold");
+        this.react("annoyed", 0.9, () => this.stormOff(fromX));
+        return;
+      case "offensive":
+        this.say("anger", 1.4);
+        this.reacted("offended");
+        this.react("angry", 1.1, () => this.stormOff(fromX));
+        return;
+      case "onion":
+        this.reacted("cried");
+        this.crying = 2.2;
+        this.say("ellipsis", 1.6);
+        this.react("sulky", 1.6, () => this.stormOff(fromX));
+        return;
+    }
+  }
+
+  private crying = 0;
+
+  /** Check whether it has wandered into something it should avoid. */
+  private checkDangers(): void {
+    if (this.mode !== "auto" || this.perch || this.h > 0 || this.asleep) return;
+    // While doing something on purpose (eating from the open fridge, say), it puts up with it.
+    if (this.activity?.kind === "use") return;
+    for (const { propId, danger } of this.room.dangers()) {
+      const last = this.dangerSeen.get(propId) ?? -Infinity;
+      if (this.time - last < DANGER_COOLDOWN) continue;
+      if (inDanger(this.x, this.ground, danger)) {
+        this.avoid(propId, danger.kind, danger.x);
+        return;
+      }
     }
   }
 
@@ -642,6 +790,11 @@ export class Tomatoshi {
     this.dt = dt;
     this.idleFor += dt;
     this.lightChanged(this.room.light());
+    if (this.viewer !== this.room.id) this.apartFor += dt;
+    else this.apartFor = 0;
+    if (this.presence < 1 && !this.leaving) this.presence = Math.min(1, this.presence + dt * 2);
+    this.crying = Math.max(0, this.crying - dt);
+    if (this.every(0.25)) this.checkDangers();
     this.needs = decayNeeds(this.needs, dt, this.asleep ? "asleep" : this.perch ? "sitting" : "awake");
 
     switch (this.mode) {
@@ -693,6 +846,12 @@ export class Tomatoshi {
     if (this.mode === "held" && this.every(0.35)) this.burst("sweat");
     if (this.mode === "react" && this.reactExpression === "holdingLaugh" && this.every(0.25)) this.burst("sweat");
     if (this.mode === "react" && this.reactExpression === "dizzy" && this.every(0.22)) this.burst("star");
+    if (this.crying > 0 && this.every(0.18)) {
+      // Onion tears, from both eyes.
+      const side = this.rng() < 0.5 ? -1 : 1;
+      this.fx("drop", this.x + side * 38 * s, this.ground - this.h + (BODY_CY + 4) * s);
+    }
+    if (this.bathing && this.every(0.3)) this.fx("drop", this.x + (this.rng() - 0.5) * 120 * s, head.y + 160 * s);
   }
 
   private updateAuto(dt: number): void {
@@ -703,11 +862,14 @@ export class Tomatoshi {
         area: this.area,
         idleFor: this.idleFor,
         last: this.lastActivity,
-        // It only dances when it thinks nobody is looking.
-        opportunities: this.room
-          .opportunities()
-          .filter((o) => o.action !== "dance" || this.time - this.pointer.seenAt > DANCE_SHYNESS),
+        opportunities: this.weighDoors(
+          this.room
+            .opportunities()
+            // It only dances when it thinks nobody is looking.
+            .filter((o) => o.action !== "dance" || this.time - this.pointer.seenAt > DANCE_SHYNESS),
+        ),
         needs: this.needs,
+        avoid: (p) => this.room.dangers().some(({ danger }) => inDanger(p.x, p.y, danger)),
         rng: this.rng,
       });
       this.activityTime = 0;
@@ -718,7 +880,8 @@ export class Tomatoshi {
     const a = this.activity;
 
     // Anything other than sitting here means getting down first.
-    const seated = a.kind === "use" && (a.action === "sit" || a.action === "nap") && this.using.phase === "act";
+    const seated =
+      a.kind === "use" && (a.action === "sit" || a.action === "nap" || a.action === "bathe") && this.using.phase === "act";
     if (this.perch && !seated) {
       this.perch = null;
       this.vh = 300;
@@ -741,6 +904,28 @@ export class Tomatoshi {
       this.activity = null;
       this.storming = false;
     }
+  }
+
+  /**
+   * Doors are a little interesting on their own. More so when you've been in
+   * another room for a while (it'll come find you), or when what it needs
+   * isn't here (no couch to nap on, nothing to eat).
+   */
+  private weighDoors(opportunities: Opportunity[]): Opportunity[] {
+    const offers = (action: UseAction) => opportunities.some((o) => o.action === action && o.weight > 0);
+    const tired = this.needs.energy < 25 || this.room.light() < DARK;
+    const needUnmet = (tired && !offers("nap")) || (this.needs.fullness < 30 && !offers("eat"));
+    return opportunities.map((o) => {
+      if (o.action !== "leave") return o;
+      const to = this.room.state(o.propId)?.to;
+      const missesYou = to === this.viewer && this.apartFor > MISSES_YOU_AFTER;
+      return { ...o, weight: DOOR_CURIOSITY + (missesYou ? DOOR_MISSING_YOU : 0) + (needUnmet ? DOOR_NEED : 0) };
+    });
+  }
+
+  private get leaving(): boolean {
+    const a = this.activity;
+    return this.mode === "auto" && a?.kind === "use" && a.action === "leave" && this.using.phase === "act";
   }
 
   /** Step toward a point. Returns true on arrival. */
@@ -824,6 +1009,31 @@ export class Tomatoshi {
         this.needs = applyEffect(this.needs, { fun: FUN_RATE.dance * dt });
         if (this.every(2.2) && !this.bubble.symbol) this.say("note", 1.2);
         break;
+      case "leave":
+        // Into the doorway, fading out; then it's in the other room.
+        this.presence = Math.max(0, 1 - u.time / DOOR_TIME);
+        this.ground -= 50 * dt;
+        if (u.time >= DOOR_TIME) {
+          this.arrivedFromLooking = this.room.state(a.propId)?.to === this.viewer && this.apartFor > MISSES_YOU_AFTER;
+          this.travel(a.propId);
+          return false; // `enter` has given it something new to do
+        }
+        break;
+      case "bathe":
+        this.needs = applyEffect(this.needs, { fun: FUN_RATE.bath * dt });
+        if (u.time > 1.8 && !u.done) {
+          u.done = true;
+          this.say("note", 1.4); // …this is actually nice
+          this.reacted("bathed");
+        }
+        break;
+      case "grumble":
+        if (u.time >= 0.6 && !u.done) {
+          u.done = true;
+          this.say(this.rng() < 0.5 ? "anger" : "ellipsis", 1.6);
+          this.reacted("grumbled");
+        }
+        break;
       case "inspect":
         if (u.time >= 1.1 && !u.done) {
           // Empty. Whose fault is that?
@@ -847,17 +1057,21 @@ export class Tomatoshi {
 
   private beginUse(a: Extract<Activity, { kind: "use" }>): void {
     switch (a.action) {
-      case "sit":
-      case "nap": {
-        const height = this.room.seatHeight(a.propId);
-        this.perch = { propId: a.propId, height };
-        this.vh = Math.sqrt(2 * GRAVITY * (height + 40));
-        if (a.action === "nap") {
-          this.queuedBubble = { symbol: "zzz", at: this.time + 1, duration: 2.4 };
-          this.reacted("fell-asleep");
-        }
+      case "leave":
+        this.room.use(a.propId, "leave", { x: this.x, y: this.ground });
         break;
-      }
+      case "bathe":
+        this.room.use(a.propId, "bathe", { x: this.x, y: this.ground });
+        this.hopOnto(a.propId);
+        break;
+      case "sit":
+        this.hopOnto(a.propId);
+        break;
+      case "nap":
+        this.hopOnto(a.propId);
+        this.queuedBubble = { symbol: "zzz", at: this.time + 1, duration: 2.4 };
+        this.reacted("fell-asleep");
+        break;
       case "kick":
         this.room.use(a.propId, "kick", { x: this.x, y: this.ground });
         this.squashV += 3;
@@ -865,6 +1079,13 @@ export class Tomatoshi {
         this.reacted("kicked-ball");
         break;
     }
+  }
+
+  /** Jump up onto something to sit on (the couch, into the sink). */
+  private hopOnto(propId: string): void {
+    const height = this.room.seatHeight(propId);
+    this.perch = { propId, height };
+    this.vh = Math.sqrt(2 * GRAVITY * (height + 40));
   }
 
   private startActivity(a: Activity): void {
@@ -980,6 +1201,8 @@ export class Tomatoshi {
           if (a.action === "eat") return Math.floor(this.using.time * 7) % 2 ? "chompOpen" : "chompShut";
           if (a.action === "inspect") return this.using.done ? "annoyed" : "sulky";
           if (a.action === "dance") return "dancing";
+          if (a.action === "bathe") return this.using.time < 1.8 ? "annoyed" : "content";
+          if (a.action === "grumble") return "annoyed";
           if (a.action === "visit") return this.bubble.symbol === "anger" ? "annoyed" : "content";
           if (a.action === "watch") return this.room.state(a.propId)?.channel === CHANNEL.static ? "annoyed" : "grumpy";
         }
@@ -1066,10 +1289,14 @@ export class Tomatoshi {
     const s = this.depthScale;
     const lift = this.h + this.bounce;
 
+    // Going through a door: a little smaller and fading.
+    const through = 0.85 + 0.15 * this.presence;
     p.root.setAttribute(
       "transform",
-      `translate(${this.x.toFixed(1)} ${(this.ground - lift).toFixed(1)}) scale(${s.toFixed(3)}) rotate(${this.rot.toFixed(1)} 0 ${BODY_CY})`,
+      `translate(${this.x.toFixed(1)} ${(this.ground - lift).toFixed(1)}) scale(${(s * through).toFixed(3)}) rotate(${this.rot.toFixed(1)} 0 ${BODY_CY})`,
     );
+    p.root.setAttribute("opacity", this.presence.toFixed(3));
+    p.shadow.setAttribute("opacity", this.presence.toFixed(3));
     // When sitting on something the shadow falls on its surface.
     const surface = this.ground - this.floorLevel;
     const shadowScale = s / (1 + (lift - this.floorLevel) / 250);

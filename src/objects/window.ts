@@ -6,13 +6,13 @@ import { svgEl } from "../engine/stage";
 import { palette as c } from "../palette";
 import { emitProp, tagProp, type Prop, type PropFactory } from "./prop";
 
-const W = 260;
-const H = 300;
 const INSET = 16;
 const CURTAIN_OPEN = 34;
-const CURTAIN_CLOSED = W / 2 + 22;
 
 export const createWindow: PropFactory = (def, ctx) => {
+  const W = def.w ?? 260;
+  const H = def.h ?? 300;
+  const CURTAIN_CLOSED = W / 2 + 22;
   ctx.world.add(def.id, { curtainsOpen: true, ...def.state });
   const open = () => ctx.world.value<boolean>(def.id, "curtainsOpen");
 
@@ -24,12 +24,14 @@ export const createWindow: PropFactory = (def, ctx) => {
     "g",
     { opacity: 0 },
     [
-      [40, 50], [110, 30], [180, 70], [70, 120], [150, 150], [200, 210], [50, 230], [120, 250],
-    ].map(([x, y], i) => svgEl("circle", { cx: INSET + x, cy: INSET + y, r: i % 3 === 0 ? 3.5 : 2.5, fill: c.star })),
+      [0.18, 0.18], [0.48, 0.1], [0.79, 0.26], [0.31, 0.45], [0.66, 0.56], [0.88, 0.78], [0.22, 0.86], [0.53, 0.93],
+    ].map(([fx, fy], i) =>
+      svgEl("circle", { cx: INSET + fx * paneW, cy: INSET + fy * paneH, r: i % 3 === 0 ? 3.5 : 2.5, fill: c.star }),
+    ),
   );
 
   const bodyX = INSET + paneW * 0.72;
-  const bodyY = INSET + 70;
+  const bodyY = INSET + Math.min(70, paneH * 0.3);
   const sun = svgEl("circle", { cx: bodyX, cy: bodyY, r: 30, fill: c.sun });
   // Crescent moon: a pale disc with a sky-colored disc over part of it.
   const moonBite = svgEl("circle", { cx: bodyX + 14, cy: bodyY - 8, r: 22, fill: c.sky });

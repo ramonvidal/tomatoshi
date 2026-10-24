@@ -8,11 +8,8 @@ export const STAGE_HEIGHT = 1280;
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
 
-/**
- * Back to front: room backdrop, wall-mounted props, floor shadows,
- * depth-sorted floor props + Tomatoshi, particles, lighting, speech bubbles.
- */
-export type LayerName = "background" | "wall" | "shadows" | "world" | "effects" | "lighting" | "ui";
+/** Rooms (each with its own layers, see Room), then speech bubbles and fades on top. */
+export type LayerName = "rooms" | "ui";
 
 export interface Stage {
   svg: SVGSVGElement;
@@ -47,7 +44,7 @@ export function createStage(container: HTMLElement): Stage {
   svg.appendChild(root);
 
   const layers = {} as Record<LayerName, SVGGElement>;
-  for (const name of ["background", "wall", "shadows", "world", "effects", "lighting", "ui"] as const) {
+  for (const name of ["rooms", "ui"] as const) {
     layers[name] = svgEl("g", { class: `layer layer-${name}` });
     root.appendChild(layers[name]);
   }

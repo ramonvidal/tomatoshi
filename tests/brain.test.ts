@@ -97,6 +97,14 @@ describe("brain", () => {
     expect(kinds).toContain("sulk");
   });
 
+  it("never picks walk targets in places it avoids", () => {
+    const rng = seededRng(12);
+    const avoid = (p: { x: number; y: number }) => p.y < 1000; // the whole back of the room
+    for (let i = 0; i < 200; i++) {
+      expect(walkTarget({ x: 350, y: 1100, area, rng, avoid }).y).toBeGreaterThanOrEqual(1000);
+    }
+  });
+
   it("storms off to the opposite side", () => {
     const rng = seededRng(5);
     for (let i = 0; i < 50; i++) {

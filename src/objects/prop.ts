@@ -12,7 +12,18 @@ import type { ObjectState, World } from "../engine/world";
 /** Below this much light, Tomatoshi gets sleepy. */
 export const DARK = 0.35;
 
-export type UseAction = "sit" | "nap" | "kick" | "eat" | "inspect" | "watch" | "visit" | "dance";
+export type UseAction =
+  | "sit"
+  | "nap"
+  | "kick"
+  | "eat"
+  | "inspect"
+  | "watch"
+  | "visit"
+  | "dance"
+  | "leave"
+  | "bathe"
+  | "grumble";
 
 /** Something Tomatoshi could choose to do, and how much it feels like it. */
 export interface Opportunity {
@@ -31,7 +42,11 @@ export type PropEventKind =
   | "hit-friend"
   | "toggled"
   | "watered"
-  | "channel";
+  | "channel"
+  | "door"
+  | "splashed"
+  | "rattled"
+  | "onion";
 
 export interface Point {
   x: number;
@@ -68,12 +83,26 @@ export interface LightSource {
   tone: "warm" | "cool";
 }
 
+/** Why Tomatoshi keeps away from something. */
+export type DangerKind = "sharp" | "hot" | "cold" | "offensive" | "onion";
+
+/** A zone on the floor (center and radius) it would rather avoid. */
+export interface Danger {
+  x: number;
+  y: number;
+  radius: number;
+  kind: DangerKind;
+}
+
 /** A prop as listed in a scene file. */
 export interface PropDef {
   id: string;
   type: string;
   x: number;
   y: number;
+  /** Optional size, for props that come in different sizes (e.g. windows). */
+  w?: number;
+  h?: number;
   state?: ObjectState;
 }
 
@@ -102,6 +131,12 @@ export interface Prop {
   ambientLight?(): number;
   /** A local pool of light. */
   lightSource?(): LightSource | null;
+  /** A zone Tomatoshi avoids right now. */
+  danger?(): Danger | null;
+  /** For doors: the room this one leads to. */
+  doorTo?(): string | null;
+  /** For doors: Tomatoshi peeks back in from the other side. */
+  peek?(): void;
 }
 
 export type PropFactory = (def: PropDef, ctx: PropContext) => Prop;

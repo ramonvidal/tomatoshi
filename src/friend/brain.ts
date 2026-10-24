@@ -30,6 +30,8 @@ export interface BrainContext {
   /** What the room's objects offer right now. */
   opportunities: Opportunity[];
   needs?: Needs;
+  /** Places it won't pick to walk to. */
+  avoid?: (p: { x: number; y: number }) => boolean;
   rng: Rng;
 }
 
@@ -44,6 +46,9 @@ export const NEED_FOR: Record<UseAction, NeedName> = {
   dance: "fun",
   // Visiting its cousin the plant is how it consoles itself.
   visit: "affection",
+  leave: "fun",
+  bathe: "fun",
+  grumble: "fun",
 };
 
 /** What objects offer, weighted by how much it needs each thing now. */
@@ -128,18 +133,26 @@ export function useDuration(action: UseAction, rng: Rng): number {
       return 3.4;
     case "dance":
       return between(rng, 6, 10);
+    case "leave":
+      return 0.7;
+    case "bathe":
+      return between(rng, 6, 9);
+    case "grumble":
+      return 3;
   }
 }
 
 /** A random spot in the area, far enough to be worth walking to. */
-export function walkTarget({ x, y, area, rng }: Pick<BrainContext, "x" | "y" | "area" | "rng">): {
+export function walkTarget({ x, y, area, rng, avoid }: Pick<BrainContext, "x" | "y" | "area" | "rng" | "avoid">): {
   x: number;
   y: number;
 } {
-  let best = { x: area.minX, y: area.minY };
+  // Fallback: the middle of the front of the room, which is never dangerous.
+  let best = { x: (area.minX + area.maxX) / 2, y: area.maxY };
   let bestDist = -1;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 12; i++) {
     const p = { x: between(rng, area.minX, area.maxX), y: between(rng, area.minY, area.maxY) };
+    if (avoid?.(p)) continue;
     const d = Math.hypot(p.x - x, p.y - y);
     if (d >= MIN_WALK) return p;
     if (d > bestDist) {

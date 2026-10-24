@@ -27,6 +27,7 @@ export function attachDebugPanel(friend: Tomatoshi, light: () => number): void {
       ...NEED_NAMES.map((n) => `${n.padEnd(9)} ${bar(needs[n])} ${needs[n].toFixed(0).padStart(3)}`),
       `mood      ${friend.mood}`,
       `doing     ${friend.doing}`,
+      `room      ${friend.room.id}`,
       `light     ${light().toFixed(2)}`,
     ].join("\n");
   }, 250);
