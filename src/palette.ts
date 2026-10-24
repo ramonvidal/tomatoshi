@@ -40,6 +40,17 @@ export const palette = {
   bowlInside: "#4f7aab",
   snack: "#e0a458",
   snackDark: "#c98b3f",
+  radio: "#e9c46a",
+  radioDark: "#6b5b4b",
+  radioDial: "#fff3c4",
+  radioLight: "#7fd18b",
+  shelf: "#b98a5e",
+  shelfDark: "#9c7149",
+  tv: "#c97c5d",
+  tvDark: "#8a523d",
+  tvScreen: "#3b3f4a",
+  pot: "#d9774b",
+  potDark: "#c0643b",
 
   letterbox: "#2e2626",
 } as const;

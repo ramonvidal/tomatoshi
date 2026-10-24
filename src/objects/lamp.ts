@@ -52,7 +52,7 @@ export const createLamp: PropFactory = (def, ctx) => {
       emitProp(ctx, def.id, "toggled");
     },
     ambientLight: () => (isOn() ? 0.55 : 0),
-    lightSource: () => (isOn() ? { x: def.x, y: def.y + SHADE_Y, radius: 480 } : null),
+    lightSource: () => (isOn() ? { x: def.x, y: def.y + SHADE_Y, radius: 480, tone: "warm" } : null),
   };
   return prop;
 };

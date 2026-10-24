@@ -5,6 +5,7 @@ import { createClock } from "./engine/clock";
 import { EventBus, type GameEvents } from "./engine/events";
 import { attachPointerInput, GestureRecognizer } from "./engine/input";
 import { Loop } from "./engine/loop";
+import { Particles } from "./engine/particles";
 import { seededRng } from "./engine/random";
 import { Room } from "./engine/room";
 import { createStage } from "./engine/stage";
@@ -29,6 +30,7 @@ const world = new World(events, saved?.world);
 const stage = createStage(app);
 const rng = seededRng(Date.now());
 const scene = scenes["living-room"];
+const particles = new Particles(stage.layers.effects, rng);
 
 // The room and Tomatoshi need each other: props bump into it, it uses props.
 let tomatoshi: Tomatoshi | null = null;
@@ -41,6 +43,7 @@ const room = new Room(
     rng,
     area: scene.walkArea,
     hour: createClock(),
+    fx: particles.emit,
     friend: () => {
       if (!tomatoshi) throw new Error("Tomatoshi not created yet");
       return tomatoshi;
@@ -58,6 +61,7 @@ const friend = new Tomatoshi({
   y: start.y,
   // Time away is caught up gently: it rested, and got a bit hungry and bored.
   needs: saved ? catchUp(saved.friend.needs, secondsAway) : undefined,
+  fx: particles.emit,
   rng,
   onReaction: (reaction) => events.emit("friend.reaction", { reaction }),
 });
@@ -83,6 +87,7 @@ events.on("loop.tick", ({ dt }) => {
   recognizer.update(performance.now());
   friend.update(dt);
   room.update(dt, { root: friend.parts.root, y: friend.ground });
+  particles.update(dt);
 });
 
 // Remember everything between visits.
@@ -97,4 +102,12 @@ addEventListener("pagehide", save);
 if (params.has("debug")) attachDebugPanel(friend, () => room.light());
 
 friend.greet(secondsAway, saved?.friend.needs.affection);
+document.body.classList.add("ready"); // fade in
+
+// Installable and playable offline (production builds only).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {
+    // Not fatal: it just won't work offline.
+  });
+}
 new Loop((dt, time) => events.emit("loop.tick", { dt, time })).start();

@@ -28,6 +28,9 @@ And the room:
 | Tap the lamp | Light on/off. In the dark it goes to nap on the couch; light wakes it up, annoyed |
 | Tap the window | Opens/closes the curtains. The sky follows the real time of day |
 | Tap the couch | Bounces the cushions, and whoever is sitting on them |
+| Tap the radio | Music. If nobody's looking, Tomatoshi dances. Touch it mid-dance and it was definitely not dancing |
+| Tap the TV | Changes channel: color bars (it watches), static (it grumbles), a cooking show with a knife (it flees) |
+| Tap the plant | Waters its tomato cousins, the only ones it's nice to. Let them go thirsty and it glares at you |
 
 ### Its needs
 
@@ -47,8 +50,14 @@ know how it feels about you.
 | Option | What it does |
 |---|---|
 | `?hour=22` | See the room at a different time of day |
-| `?debug` | Show its needs and mood |
+| `?debug` | Show its needs, mood and what it's doing |
 | `?reset` | Forget everything and start fresh |
+
+## Install it on your phone
+
+Open the deployed page in your phone's browser and use **Add to Home Screen**
+(Safari: Share → Add to Home Screen; Chrome: menu → Install app). It then
+opens full screen like an app, and works offline.
 
 ## Development
 

@@ -248,9 +248,15 @@ tomatoshi/
   up gently, and it greets you based on how it felt when you left.
 - `?debug` shows needs and mood; `?reset` starts fresh.
 
-**M4 — Polish**
-- Particles (hearts, steam from anger, Zzz, sweat drops), transitions.
-- Radio, TV, plant. PWA install.
+**M4 — Polish** ✅
+- Particles: hearts, steam when angry, floating Z's, sweat, landing dust,
+  crumbs, impact stars, music notes, water drops.
+- Transitions: fade-in on start, light changes fade, light pools grow/shrink.
+- Radio (dances in secret; caught if you touch it), TV (channels: color bars,
+  static it grumbles at, a cooking show with a knife it flees from), potted
+  tomato plant (its cousins; dries out, tap to water; it glares at you when
+  they're thirsty).
+- Installable PWA with icons, works offline.
 
 **M5 — The kitchen**
 - Door/exit system + kitchen scene; Tomatoshi wanders between rooms by itself.

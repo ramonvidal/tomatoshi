@@ -8,8 +8,11 @@
 import { depthScale } from "../engine/area";
 import { between, pick, type Rng } from "../engine/random";
 import type { Bounds, Gesture } from "../engine/input";
+import type { Effects, ParticleKind } from "../engine/particles";
 import type { Surroundings } from "../engine/room";
+import { THIRSTY } from "../objects/plant";
 import { DARK, type Point, type PropEventKind, type UseAction } from "../objects/prop";
+import { CHANNEL } from "../objects/tv";
 import { BODY_CY, BODY_RX, BODY_RY, drawTomatoshi, HEAD_TOP, renderFace, type FaceState } from "./art";
 import { blendFace, expressions, type ExpressionName } from "./expressions";
 import { SpeechBubble, type BubbleSymbol } from "./bubbles";
@@ -34,7 +37,10 @@ export type Reaction =
   | "woke-up"
   | "ate"
   | "kicked-ball"
-  | "found-bowl-empty";
+  | "found-bowl-empty"
+  | "caught-dancing"
+  | "visited-cousin"
+  | "scared";
 
 /** How each reaction changes its needs. Rough handling costs affection. */
 const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
@@ -52,7 +58,14 @@ const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
   ate: { fullness: 35 },
   "kicked-ball": { fun: 15, energy: -2 },
   "found-bowl-empty": { affection: -3 },
+  "caught-dancing": { fun: 5 },
+  "visited-cousin": { affection: 10 },
+  "scared": { affection: -2 },
 };
+/** Fun per second from things it enjoys (and would deny enjoying). */
+const FUN_RATE = { dance: 2, tv: 1.2, staticTv: 0.3 };
+/** Don't dance while someone touched the screen this recently (seconds). */
+const DANCE_SHYNESS = 4;
 /** Affection per stage unit of stroking (less as affection gets high). */
 const STROKE_AFFECTION = 0.004;
 
@@ -67,6 +80,8 @@ export interface TomatoshiOptions {
   area: Area;
   room: Surroundings;
   needs?: Needs;
+  /** Where to spawn particle effects. */
+  fx?: Effects;
   x: number;
   y: number;
   rng: Rng;
@@ -167,6 +182,8 @@ export class Tomatoshi {
   private using = { phase: "approach" as "approach" | "act", time: 0, done: false };
   private lastLight: number | null = null;
   private needs: Needs;
+  private readonly fx: Effects;
+  private dt = 0;
   // Stem posture follows mood: perky, normal, spiky or droopy.
   private stemPose = { sx: 1, sy: 1, dy: 0 };
 
@@ -178,7 +195,26 @@ export class Tomatoshi {
   private reacted(reaction: Reaction): void {
     const effect = REACTION_EFFECTS[reaction];
     if (effect) this.needs = applyEffect(this.needs, effect);
+    if (reaction === "secretly-happy" || reaction === "visited-cousin") this.burst("heart", 3);
+    if (reaction === "bonked" || reaction === "stem-poked") this.burst("star", 5);
+    if (reaction === "tickled" || reaction === "scared") this.burst("sweat", 3);
     this.onReaction(reaction);
+  }
+
+  /** Particles from the top of its head. */
+  private burst(kind: ParticleKind, count = 1): void {
+    const head = this.headAnchor;
+    this.fx(kind, head.x + (this.rng() - 0.5) * 60 * this.depthScale, head.y + 20, count);
+  }
+
+  /** True once every `interval` seconds (on the frame that crosses it). */
+  private every(interval: number): boolean {
+    return Math.floor(this.time / interval) !== Math.floor((this.time - this.dt) / interval);
+  }
+
+  get dancing(): boolean {
+    const a = this.activity;
+    return this.mode === "auto" && a?.kind === "use" && a.action === "dance" && this.using.phase === "act";
   }
 
   constructor(options: TomatoshiOptions) {
@@ -189,6 +225,7 @@ export class Tomatoshi {
     this.ground = options.y;
     this.onReaction = options.onReaction ?? (() => {});
     this.needs = { ...(options.needs ?? DEFAULT_NEEDS) };
+    this.fx = options.fx ?? (() => {});
     this.blinkTimer = between(this.rng, 1, 4);
   }
 
@@ -200,6 +237,15 @@ export class Tomatoshi {
   /** Things can bump into it, unless it's being held or flying. */
   get solid(): boolean {
     return this.mode !== "held" && this.mode !== "thrown";
+  }
+
+  /** What it's up to, in a few words (for the debug panel). */
+  get doing(): string {
+    const a = this.activity;
+    if (this.mode !== "auto") return this.mode === "react" ? `react ${this.reactExpression}` : this.mode;
+    if (!a) return "deciding";
+    if (a.kind === "use") return `${a.action} ${a.propId} (${this.using.phase})`;
+    return a.kind;
   }
 
   get mood(): Mood {
@@ -226,6 +272,7 @@ export class Tomatoshi {
       this.say("heart", 0.6);
       this.queuedBubble = { symbol: "ellipsis", at: this.time + 0.6, duration: 1.4 };
       this.react("secretlyHappy", 2);
+      this.burst("heart", 2);
     } else if (fondness < 30) {
       this.say("anger", 1.8);
       this.react("annoyed", 1.6);
@@ -264,6 +311,14 @@ export class Tomatoshi {
     if (this.asleep) {
       // Being woken up is the worst. A tap does nothing else.
       this.wakeUp("angry");
+      if (g.type === "tap") return;
+    }
+    if (this.dancing) {
+      // Caught! It was NOT dancing.
+      this.say("exclaim", 0.7);
+      this.queuedBubble = { symbol: "ellipsis", at: this.time + 0.7, duration: 1.4 };
+      this.reacted("caught-dancing");
+      this.react("annoyed", 1.8);
       if (g.type === "tap") return;
     }
 
@@ -498,7 +553,23 @@ export class Tomatoshi {
       case "hit-friend":
         this.bonked(propId);
         break;
+      case "channel":
+        // A cooking show. With knives. Absolutely not.
+        if (this.room.state(propId)?.channel === CHANNEL.cooking && !this.asleep && this.solid) this.scared(propId);
+        break;
     }
+  }
+
+  private scared(fromPropId: string): void {
+    this.perch = null;
+    this.say("exclaim", 1.2);
+    this.reacted("scared");
+    this.hop(380);
+    const from = this.room.focus(fromPropId)?.x ?? this.x;
+    this.react("surprised", 0.9, () => {
+      this.say("anger", 1.4);
+      this.stormOff(from);
+    });
   }
 
   private bonked(propId: string): void {
@@ -568,6 +639,7 @@ export class Tomatoshi {
 
   update(dt: number): void {
     this.time += dt;
+    this.dt = dt;
     this.idleFor += dt;
     this.lightChanged(this.room.light());
     this.needs = decayNeeds(this.needs, dt, this.asleep ? "asleep" : this.perch ? "sitting" : "awake");
@@ -597,6 +669,7 @@ export class Tomatoshi {
     this.updatePhysics(dt);
     this.updateSprings(dt);
     this.updateFace(dt);
+    this.updateEffects();
 
     if (this.queuedBubble && this.time >= this.queuedBubble.at) {
       const { symbol, duration } = this.queuedBubble;
@@ -604,6 +677,22 @@ export class Tomatoshi {
     }
 
     this.render(dt);
+  }
+
+  /** Continuous effects that go with what it's doing. */
+  private updateEffects(): void {
+    const head = this.headAnchor;
+    const s = this.depthScale;
+    const fuming = this.mode === "react" && (this.reactExpression === "angry" || this.reactExpression === "furious");
+    if (fuming && this.every(0.12)) {
+      // Steam out of both sides of the head.
+      const side = this.rng() < 0.5 ? -1 : 1;
+      this.fx("steam", head.x + side * 70 * s, head.y + 40 * s);
+    }
+    if (this.asleep && this.every(1.3)) this.fx("z", head.x + 30 * s, head.y + 10);
+    if (this.mode === "held" && this.every(0.35)) this.burst("sweat");
+    if (this.mode === "react" && this.reactExpression === "holdingLaugh" && this.every(0.25)) this.burst("sweat");
+    if (this.mode === "react" && this.reactExpression === "dizzy" && this.every(0.22)) this.burst("star");
   }
 
   private updateAuto(dt: number): void {
@@ -614,7 +703,10 @@ export class Tomatoshi {
         area: this.area,
         idleFor: this.idleFor,
         last: this.lastActivity,
-        opportunities: this.room.opportunities(),
+        // It only dances when it thinks nobody is looking.
+        opportunities: this.room
+          .opportunities()
+          .filter((o) => o.action !== "dance" || this.time - this.pointer.seenAt > DANCE_SHYNESS),
         needs: this.needs,
         rng: this.rng,
       });
@@ -693,12 +785,44 @@ export class Tomatoshi {
         if (this.needs.energy >= 98 && this.room.light() >= DARK) return true;
         break;
       case "eat":
-        if (Math.floor(u.time * 7) !== Math.floor((u.time - dt) * 7)) this.squashV += 0.8; // chomp
+        if (Math.floor(u.time * 7) !== Math.floor((u.time - dt) * 7)) {
+          this.squashV += 0.8; // chomp
+          const mouthY = this.ground - this.h + (BODY_CY + 34) * this.depthScale;
+          if (this.rng() < 0.5) this.fx("crumb", this.x + 30 * this.depthScale, mouthY);
+        }
         if (u.time >= 1.2 && !u.done) {
           u.done = true;
           this.room.use(a.propId, "eat", { x: this.x, y: this.ground });
           this.reacted("ate");
         }
+        break;
+      case "watch": {
+        const channel = this.room.state(a.propId)?.channel;
+        if (channel === CHANNEL.off || channel === undefined) return true;
+        if (channel === CHANNEL.static) {
+          if (u.time > 1 && this.every(2.6)) this.say("anger", 1.2); // fix your TV
+          this.needs = applyEffect(this.needs, { fun: FUN_RATE.staticTv * dt });
+        } else {
+          this.needs = applyEffect(this.needs, { fun: FUN_RATE.tv * dt });
+        }
+        break;
+      }
+      case "visit":
+        if (u.time >= 0.7 && !u.done) {
+          u.done = true;
+          const water = this.room.state(a.propId)?.water;
+          if (typeof water === "number" && water < THIRSTY) {
+            this.say("anger", 1.6); // its cousin is thirsty, and whose fault is that?
+          } else {
+            this.say("heart", 1.3); // the one heart it doesn't hide
+            this.reacted("visited-cousin");
+          }
+        }
+        break;
+      case "dance":
+        if (this.room.state(a.propId)?.on === false) return true;
+        this.needs = applyEffect(this.needs, { fun: FUN_RATE.dance * dt });
+        if (this.every(2.2) && !this.bubble.symbol) this.say("note", 1.2);
         break;
       case "inspect":
         if (u.time >= 1.1 && !u.done) {
@@ -766,6 +890,11 @@ export class Tomatoshi {
       this.h <= this.floorLevel &&
       (a?.kind === "walk" || (a?.kind === "use" && this.using.phase === "approach"));
     this.bounce = walking ? Math.abs(Math.sin(this.walkPhase * Math.PI)) * (this.storming ? 22 : 16) : 0;
+    if (this.dancing) {
+      // Two bounces a second, swaying side to side.
+      this.bounce = Math.abs(Math.sin(this.time * Math.PI * 2)) * 14;
+      this.rot = Math.sin(this.time * Math.PI * 2) * 8;
+    }
 
     if (this.mode === "held") {
       this.rot = Math.sin(this.time * 13) * 6; // wriggling
@@ -781,6 +910,7 @@ export class Tomatoshi {
         const impact = -this.vh;
         this.h = floor;
         this.vh = 0;
+        if (impact > 450) this.fx("dust", this.x, this.ground - floor, Math.min(6, Math.round(impact / 250)));
         this.squashV += impact * 0.006;
         if (this.mode === "thrown") {
           if (impact > 650) this.vh = impact * 0.35; // bounce
@@ -808,7 +938,7 @@ export class Tomatoshi {
     }
 
     // Settle back upright (to the nearest full turn) once not moving.
-    if (this.mode !== "thrown") {
+    if (this.mode !== "thrown" && !this.dancing) {
       const upright = Math.round(this.rot / 360) * 360;
       this.rot = approach(this.rot, upright, 8, dt);
       if (Math.abs(this.rot - upright) < 0.5) this.rot = 0;
@@ -849,6 +979,9 @@ export class Tomatoshi {
           if (a.action === "nap") return "asleep";
           if (a.action === "eat") return Math.floor(this.using.time * 7) % 2 ? "chompOpen" : "chompShut";
           if (a.action === "inspect") return this.using.done ? "annoyed" : "sulky";
+          if (a.action === "dance") return "dancing";
+          if (a.action === "visit") return this.bubble.symbol === "anger" ? "annoyed" : "content";
+          if (a.action === "watch") return this.room.state(a.propId)?.channel === CHANNEL.static ? "annoyed" : "grumpy";
         }
         return MOOD_EXPRESSION[this.mood];
       }
@@ -871,6 +1004,8 @@ export class Tomatoshi {
     if (this.mode === "auto" && a?.kind === "use") {
       if (a.action === "nap" && this.using.phase === "act") return { x: 0, y: 0.3 };
       if (a.action === "inspect" && this.using.done) return { x: 0, y: 0.1 }; // at you
+      if (a.action === "visit" && this.using.done && this.bubble.symbol === "anger") return { x: 0, y: 0.1 };
+      if (a.action === "dance" && this.using.phase === "act") return { x: Math.sin(this.time * Math.PI) * 0.5, y: -0.2 };
       const focus = this.room.focus(a.propId);
       if (focus) return { x: clamp((focus.x - this.x) / 200, -1, 1), y: clamp((focus.y - headY) / 250, -1, 1) };
     }

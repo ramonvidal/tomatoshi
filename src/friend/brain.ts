@@ -40,6 +40,10 @@ export const NEED_FOR: Record<UseAction, NeedName> = {
   nap: "energy",
   sit: "energy",
   kick: "fun",
+  watch: "fun",
+  dance: "fun",
+  // Visiting its cousin the plant is how it consoles itself.
+  visit: "affection",
 };
 
 /** What objects offer, weighted by how much it needs each thing now. */
@@ -118,6 +122,12 @@ export function useDuration(action: UseAction, rng: Rng): number {
       return 2.6;
     case "inspect":
       return 2.6;
+    case "watch":
+      return between(rng, 8, 14);
+    case "visit":
+      return 3.4;
+    case "dance":
+      return between(rng, 6, 10);
   }
 }
 

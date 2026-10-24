@@ -5,13 +5,14 @@
 import type { Area } from "../engine/area";
 import type { EventBus, GameEvents } from "../engine/events";
 import type { Bounds, Gesture } from "../engine/input";
+import type { Effects } from "../engine/particles";
 import type { Rng } from "../engine/random";
 import type { ObjectState, World } from "../engine/world";
 
 /** Below this much light, Tomatoshi gets sleepy. */
 export const DARK = 0.35;
 
-export type UseAction = "sit" | "nap" | "kick" | "eat" | "inspect";
+export type UseAction = "sit" | "nap" | "kick" | "eat" | "inspect" | "watch" | "visit" | "dance";
 
 /** Something Tomatoshi could choose to do, and how much it feels like it. */
 export interface Opportunity {
@@ -21,7 +22,16 @@ export interface Opportunity {
 }
 
 /** Things a prop tells the rest of the room about. */
-export type PropEventKind = "thrown" | "kicked" | "refilled" | "emptied" | "bounced" | "hit-friend" | "toggled";
+export type PropEventKind =
+  | "thrown"
+  | "kicked"
+  | "refilled"
+  | "emptied"
+  | "bounced"
+  | "hit-friend"
+  | "toggled"
+  | "watered"
+  | "channel";
 
 export interface Point {
   x: number;
@@ -47,6 +57,15 @@ export interface PropContext {
   friend: () => FriendView;
   /** Hour of the day, 0..24. */
   hour: () => number;
+  fx: Effects;
+}
+
+/** A pool of light in the room. Warm for lamps, cool for screens. */
+export interface LightSource {
+  x: number;
+  y: number;
+  radius: number;
+  tone: "warm" | "cool";
 }
 
 /** A prop as listed in a scene file. */
@@ -82,7 +101,7 @@ export interface Prop {
   /** Light it lets into the whole room, 0..1. */
   ambientLight?(): number;
   /** A local pool of light. */
-  lightSource?(): { x: number; y: number; radius: number } | null;
+  lightSource?(): LightSource | null;
 }
 
 export type PropFactory = (def: PropDef, ctx: PropContext) => Prop;

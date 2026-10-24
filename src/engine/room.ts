@@ -5,7 +5,8 @@ import type { Area } from "./area";
 import type { Gesture } from "./input";
 import { propIdOf } from "./input";
 import { svgEl, STAGE_HEIGHT, STAGE_WIDTH, type Stage } from "./stage";
-import type { Opportunity, Point, Prop, PropContext, PropDef, PropFactory, UseAction } from "../objects/prop";
+import type { LightSource, Opportunity, Point, Prop, PropContext, PropDef, PropFactory, UseAction } from "../objects/prop";
+import type { ObjectState, World } from "./world";
 
 /** A doorway to another room. Used from M5. */
 export interface ExitDef {
@@ -43,19 +44,33 @@ export interface Surroundings {
   use(propId: string, action: UseAction, from: Point): void;
   seatHeight(propId: string): number;
   focus(propId: string): Point | null;
+  /** An object's current state (e.g. the TV's channel). */
+  state(propId: string): Readonly<ObjectState> | null;
 }
 
 /** Darkness overlay color and how dark "no light at all" gets. */
 const NIGHT_TINT = "#141a3a";
 const MAX_DARKNESS = 0.7;
 const BLEED = 1200;
+/** How fast the visible darkness follows the actual light (per second). */
+const LIGHT_EASE = 5;
+
+interface LightPool {
+  hole: SVGCircleElement;
+  glow: SVGCircleElement;
+  /** 0..1, fades in and out with the source. */
+  strength: number;
+  last: LightSource | null;
+}
 
 export class Room implements Surroundings {
   readonly props = new Map<string, Prop>();
   private readonly darkness: SVGRectElement;
-  private readonly glow: SVGCircleElement;
-  private readonly hole: SVGCircleElement;
+  private readonly mask: SVGMaskElement;
+  private readonly pools = new Map<string, LightPool>();
+  private readonly world: World;
   private currentLight = 1;
+  private shownDarkness: number | null = null;
 
   constructor(
     readonly def: SceneDef,
@@ -64,6 +79,7 @@ export class Room implements Surroundings {
     factories: Record<string, PropFactory>,
     backdrops: Record<string, () => SVGGElement>,
   ) {
+    this.world = ctx.world;
     const backdrop = backdrops[def.backdrop];
     if (!backdrop) throw new Error(`Unknown backdrop: ${def.backdrop}`);
     stage.layers.background.appendChild(backdrop());
@@ -77,28 +93,28 @@ export class Room implements Surroundings {
       if (prop.shadow) stage.layers.shadows.appendChild(prop.shadow);
     }
 
-    // Lighting: a dark tint over the room, with holes cut where lamps shine.
+    // Lighting: a dark tint over the room, with holes cut where lights shine.
     const big = { x: -BLEED, y: -BLEED, width: STAGE_WIDTH + 2 * BLEED, height: STAGE_HEIGHT + 2 * BLEED };
-    this.hole = svgEl("circle", { r: 0, fill: "url(#light-hole)" });
-    this.glow = svgEl("circle", { r: 0, fill: "url(#light-glow)", opacity: 0 });
+    const glowGradient = (id: string, color: string) =>
+      svgEl("radialGradient", { id }, [
+        svgEl("stop", { offset: 0, "stop-color": color, "stop-opacity": 0.55 }),
+        svgEl("stop", { offset: 1, "stop-color": color, "stop-opacity": 0 }),
+      ]);
+    this.mask = svgEl("mask", { id: "darkness-mask", maskUnits: "userSpaceOnUse", ...big }, [
+      svgEl("rect", { ...big, fill: "white" }),
+    ]);
     const defs = svgEl("defs", {}, [
       svgEl("radialGradient", { id: "light-hole" }, [
         svgEl("stop", { offset: 0, "stop-color": "black" }),
         svgEl("stop", { offset: 0.55, "stop-color": "#444" }),
         svgEl("stop", { offset: 1, "stop-color": "white" }),
       ]),
-      svgEl("radialGradient", { id: "light-glow" }, [
-        svgEl("stop", { offset: 0, "stop-color": "#ffd98a", "stop-opacity": 0.55 }),
-        svgEl("stop", { offset: 1, "stop-color": "#ffd98a", "stop-opacity": 0 }),
-      ]),
-      svgEl("mask", { id: "darkness-mask", maskUnits: "userSpaceOnUse", ...big }, [
-        svgEl("rect", { ...big, fill: "white" }),
-        this.hole,
-      ]),
+      glowGradient("light-glow-warm", "#ffd98a"),
+      glowGradient("light-glow-cool", "#9fd3ff"),
+      this.mask,
     ]);
     this.darkness = svgEl("rect", { ...big, fill: NIGHT_TINT, opacity: 0, mask: "url(#darkness-mask)", "pointer-events": "none" });
-    this.glow.setAttribute("pointer-events", "none");
-    stage.layers.lighting.append(defs, this.darkness, this.glow);
+    stage.layers.lighting.append(defs, this.darkness);
   }
 
   get walkArea(): Area {
@@ -121,7 +137,7 @@ export class Room implements Surroundings {
   update(dt: number, friend: { root: SVGGElement; y: number }): void {
     for (const prop of this.props.values()) prop.update(dt);
     this.currentLight = this.computeLight();
-    this.renderLighting();
+    this.renderLighting(dt);
     this.sortDepth(friend);
   }
 
@@ -153,6 +169,10 @@ export class Room implements Surroundings {
     return this.props.get(propId)?.focus?.() ?? null;
   }
 
+  state(propId: string): Readonly<ObjectState> | null {
+    return this.props.has(propId) ? this.world.get(propId) : null;
+  }
+
   // -------------------------------------------------------------------------
 
   private computeLight(): number {
@@ -161,22 +181,43 @@ export class Room implements Surroundings {
     return Math.min(1, light);
   }
 
-  private renderLighting(): void {
-    const darkness = (1 - this.currentLight) * MAX_DARKNESS;
+  private renderLighting(dt: number): void {
+    // Light changes fade rather than snap.
+    const target = (1 - this.currentLight) * MAX_DARKNESS;
+    const ease = 1 - Math.exp(-LIGHT_EASE * dt);
+    this.shownDarkness = this.shownDarkness === null ? target : this.shownDarkness + (target - this.shownDarkness) * ease;
+    const darkness = this.shownDarkness;
     this.darkness.setAttribute("opacity", darkness.toFixed(3));
 
-    const source = [...this.props.values()].map((p) => p.lightSource?.()).find((s) => s);
-    if (source) {
-      for (const el of [this.hole, this.glow]) {
-        el.setAttribute("cx", source.x.toFixed(1));
-        el.setAttribute("cy", source.y.toFixed(1));
-        el.setAttribute("r", source.radius.toFixed(1));
+    for (const [id, prop] of this.props) {
+      if (!prop.lightSource) continue;
+      const source = prop.lightSource();
+      let pool = this.pools.get(id);
+      if (!pool) {
+        if (!source) continue;
+        pool = {
+          hole: svgEl("circle", { r: 0, fill: "url(#light-hole)" }),
+          glow: svgEl("circle", { r: 0, opacity: 0, "pointer-events": "none" }),
+          strength: 0,
+          last: null,
+        };
+        this.mask.appendChild(pool.hole);
+        this.stage.layers.lighting.appendChild(pool.glow);
+        this.pools.set(id, pool);
       }
-      // The warm pool reads more the darker the room is.
-      this.glow.setAttribute("opacity", (0.35 + darkness).toFixed(3));
-    } else {
-      this.hole.setAttribute("r", "0");
-      this.glow.setAttribute("opacity", "0");
+      if (source) pool.last = source;
+      pool.strength += ((source ? 1 : 0) - pool.strength) * ease;
+      const s = pool.last;
+      if (!s) continue;
+      const r = (s.radius * pool.strength).toFixed(1);
+      for (const el of [pool.hole, pool.glow]) {
+        el.setAttribute("cx", s.x.toFixed(1));
+        el.setAttribute("cy", s.y.toFixed(1));
+        el.setAttribute("r", r);
+      }
+      pool.glow.setAttribute("fill", `url(#light-glow-${s.tone})`);
+      // The pool reads more the darker the room is.
+      pool.glow.setAttribute("opacity", ((0.35 + darkness) * pool.strength).toFixed(3));
     }
   }
 
