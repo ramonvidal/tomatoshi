@@ -19,9 +19,13 @@ import { backdrops, scenes } from "./scenes";
 const app = document.getElementById("app");
 if (!app) throw new Error("#app element missing");
 
+// Options come from the query string (?debug) or, where only a hash can be
+// passed (e.g. a shared link), from a single hash word (#debug).
 const params = new URLSearchParams(location.search);
+const hashWord = location.hash.slice(1);
+const option = (name: string) => params.has(name) || hashWord === name;
 const storage = safeStorage();
-if (params.has("reset")) clearSave(storage);
+if (option("reset")) clearSave(storage);
 const saved = loadSave(storage);
 const secondsAway = saved ? Math.max(0, (Date.now() - saved.savedAt) / 1000) : 0;
 
@@ -42,7 +46,7 @@ const room = new Room(
     events,
     rng,
     area: scene.walkArea,
-    hour: createClock(),
+    hour: createClock(hashWord === "night" ? "?hour=22" : location.search),
     fx: particles.emit,
     friend: () => {
       if (!tomatoshi) throw new Error("Tomatoshi not created yet");
@@ -99,7 +103,7 @@ document.addEventListener("visibilitychange", () => {
 });
 addEventListener("pagehide", save);
 
-if (params.has("debug")) attachDebugPanel(friend, () => room.light());
+if (option("debug")) attachDebugPanel(friend, () => room.light());
 
 friend.greet(secondsAway, saved?.friend.needs.affection);
 document.body.classList.add("ready"); // fade in

@@ -53,6 +53,9 @@ know how it feels about you.
 | `?debug` | Show its needs, mood and what it's doing |
 | `?reset` | Forget everything and start fresh |
 
+Where only a `#word` can be added to the link, `#debug`, `#reset` and `#night`
+(same as `?hour=22`) work too.
+
 ## Install it on your phone
 
 Open the deployed page in your phone's browser and use **Add to Home Screen**
