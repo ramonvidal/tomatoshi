@@ -240,10 +240,13 @@ tomatoshi/
   lighting; it naps when the room gets dark.
 - World state store (puzzle-ready).
 
-**M3 — A mind of its own**
-- Needs + mood, utility AI choosing objects.
-- Expressions and stem tied to mood.
-- Persist state between visits.
+**M3 — A mind of its own** ✅
+- Needs (energy, fun, fullness, affection) + mood; utility AI weighs what
+  objects offer by how much it needs them.
+- Expressions and stem posture tied to mood (perky, spiky, droopy).
+- Persist needs, position and room state between visits; time away is caught
+  up gently, and it greets you based on how it felt when you left.
+- `?debug` shows needs and mood; `?reset` starts fresh.
 
 **M4 — Polish**
 - Particles (hearts, steam from anger, Zzz, sweat drops), transitions.

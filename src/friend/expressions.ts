@@ -24,6 +24,9 @@ export const expressions = {
   /** Sulking when ignored. */
   sulky: { lid: 0.6, brow: -0.3, browLift: 0, blush: 0, eyes: "open", mouth: "frown" },
   asleep: { lid: 1, brow: 0, browLift: 0, blush: 0, eyes: "open", mouth: "flat" },
+  /** Needs all met. It still won't smile, but the frown is gone. */
+  content: { lid: 0.5, brow: 0.25, browLift: 0, blush: 0.12, eyes: "open", mouth: "flat" },
+  sleepy: { lid: 0.78, brow: -0.15, browLift: 0, blush: 0, eyes: "open", mouth: "flat" },
   /** Eating alternates these two. Enjoying it a little too visibly. */
   chompOpen: { lid: 0.6, brow: 0.2, browLift: 0, blush: 0.4, eyes: "open", mouth: "open" },
   chompShut: { lid: 0.6, brow: 0.2, browLift: 0, blush: 0.4, eyes: "open", mouth: "flat" },

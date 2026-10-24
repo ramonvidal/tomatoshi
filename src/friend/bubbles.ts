@@ -14,7 +14,8 @@ export type BubbleSymbol =
   | "note"
   | "zzz"
   | "ellipsis"
-  | "dizzy";
+  | "dizzy"
+  | "snack";
 
 const RED = "#e5484d";
 const YELLOW = "#f2c14e";
@@ -99,6 +100,20 @@ const SYMBOLS: Record<BubbleSymbol, { width: number; draw: () => SVGElement[] }>
   dizzy: {
     width: 48,
     draw: () => [line(spiralPath(0, 0, 18, 2.5), c.ink, 5)],
+  },
+  /** Hungry: the snack from the bowl, with a bite missing. */
+  snack: {
+    width: 50,
+    draw: () => [
+      svgEl("circle", { cx: 0, cy: 0, r: 22, fill: c.snack }),
+      svgEl("circle", { cx: 18, cy: -14, r: 10, fill: c.white }),
+      ...[
+        [-8, -6],
+        [6, 4],
+        [-4, 10],
+        [10, -2],
+      ].map(([x, y]) => svgEl("circle", { cx: x, cy: y, r: 3, fill: c.snackDark })),
+    ],
   },
 };
 

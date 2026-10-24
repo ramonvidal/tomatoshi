@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seededRng } from "../src/engine/random";
-import { awayFrom, chooseActivity, MIN_WALK, SULK_AFTER, walkTarget, type Area } from "../src/friend/brain";
+import { awayFrom, chooseActivity, MIN_WALK, SULK_AFTER, walkTarget, weighOpportunities, type Area } from "../src/friend/brain";
+import { DEFAULT_NEEDS } from "../src/friend/needs";
 
 const area: Area = { minX: 100, maxX: 600, minY: 900, maxY: 1200 };
 
@@ -56,14 +57,44 @@ describe("brain", () => {
       { propId: "couch", action: "nap" as const, weight: 30 },
       { propId: "ball", action: "kick" as const, weight: 0 },
     ];
+    const tired = { ...DEFAULT_NEEDS, energy: 10 };
     const picks = Array.from({ length: 300 }, () =>
-      chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities, rng }),
+      chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities, needs: tired, rng }),
     );
     const uses = picks.filter((a) => a.kind === "use");
     // A strong pull (like sleepiness in the dark) wins most of the time…
     expect(uses.length).toBeGreaterThan(200);
     // …and zero-weight options are never chosen.
     expect(uses.every((a) => a.kind === "use" && a.propId === "couch" && a.action === "nap")).toBe(true);
+  });
+
+  it("weighs what objects offer by how much it needs them", () => {
+    const offers = [
+      { propId: "bowl", action: "eat" as const, weight: 1 },
+      { propId: "ball", action: "kick" as const, weight: 1 },
+    ];
+    const hungry = weighOpportunities(offers, { ...DEFAULT_NEEDS, fullness: 5, fun: 95 });
+    expect(hungry[0].weight).toBeGreaterThan(hungry[1].weight * 5);
+    const bored = weighOpportunities(offers, { ...DEFAULT_NEEDS, fullness: 95, fun: 5 });
+    expect(bored[1].weight).toBeGreaterThan(bored[0].weight * 5);
+  });
+
+  it("asks for snacks when hungry", () => {
+    const rng = seededRng(10);
+    const hungry = { ...DEFAULT_NEEDS, fullness: 10 };
+    const symbols = Array.from({ length: 400 }, () =>
+      chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities: [], needs: hungry, rng }),
+    ).flatMap((a) => (a.kind === "mutter" ? [a.symbol] : []));
+    expect(symbols.filter((s) => s === "snack").length).toBeGreaterThan(symbols.length / 2);
+  });
+
+  it("sulks when lonely even if someone was just around", () => {
+    const rng = seededRng(11);
+    const lonely = { ...DEFAULT_NEEDS, affection: 5 };
+    const kinds = Array.from({ length: 300 }, () =>
+      chooseActivity({ x: 300, y: 1000, area, idleFor: 0, last: null, opportunities: [], needs: lonely, rng }).kind,
+    );
+    expect(kinds).toContain("sulk");
   });
 
   it("storms off to the opposite side", () => {

@@ -14,6 +14,7 @@ import { BODY_CY, BODY_RX, BODY_RY, drawTomatoshi, HEAD_TOP, renderFace, type Fa
 import { blendFace, expressions, type ExpressionName } from "./expressions";
 import { SpeechBubble, type BubbleSymbol } from "./bubbles";
 import { awayFrom, chooseActivity, useDuration, type Activity, type ActivityKind, type Area } from "./brain";
+import { applyEffect, decayNeeds, DEFAULT_NEEDS, moodOf, type Mood, type Needs } from "./needs";
 
 export type Reaction =
   | "tapped"
@@ -35,9 +36,37 @@ export type Reaction =
   | "kicked-ball"
   | "found-bowl-empty";
 
+/** How each reaction changes its needs. Rough handling costs affection. */
+const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
+  tapped: { affection: 2 },
+  tickled: { fun: 6, affection: 1 },
+  exploded: { affection: -8 },
+  "stem-poked": { affection: -3 },
+  squished: { affection: -4 },
+  "secretly-happy": { affection: 12 },
+  "picked-up": { affection: -1, fun: 2 },
+  thrown: { affection: -5, fun: 4 },
+  dizzy: { affection: -8 },
+  bonked: { affection: -6 },
+  "woke-up": { affection: -4 },
+  ate: { fullness: 35 },
+  "kicked-ball": { fun: 15, energy: -2 },
+  "found-bowl-empty": { affection: -3 },
+};
+/** Affection per stage unit of stroking (less as affection gets high). */
+const STROKE_AFFECTION = 0.004;
+
+/** What gets saved between visits. */
+export interface FriendSave {
+  needs: Needs;
+  x: number;
+  y: number;
+}
+
 export interface TomatoshiOptions {
   area: Area;
   room: Surroundings;
+  needs?: Needs;
   x: number;
   y: number;
   rng: Rng;
@@ -58,6 +87,27 @@ const THROW_SPEED = 300;
 const DIZZY_SPEED = 1400;
 /** Keep the top of the stem at least this far below the top of the stage. */
 const CEILING = 40;
+const MOOD_EXPRESSION: Record<Mood, ExpressionName> = {
+  content: "content",
+  grumpy: "grumpy",
+  veryGrumpy: "annoyed",
+  sleepy: "sleepy",
+  hungry: "grumpy",
+  lonely: "sulky",
+};
+
+/** Stem posture per mood: scale x, scale y, and sag (stage units). */
+const STEM_POSE: Record<Mood | "angry" | "asleep", { sx: number; sy: number; dy: number }> = {
+  content: { sx: 1.05, sy: 1.18, dy: -3 },
+  grumpy: { sx: 1, sy: 1, dy: 0 },
+  veryGrumpy: { sx: 1.15, sy: 0.92, dy: 0 },
+  angry: { sx: 1.25, sy: 0.85, dy: 0 },
+  sleepy: { sx: 0.92, sy: 0.7, dy: 5 },
+  asleep: { sx: 0.9, sy: 0.62, dy: 7 },
+  hungry: { sx: 0.95, sy: 0.8, dy: 3 },
+  lonely: { sx: 0.9, sy: 0.68, dy: 5 },
+};
+
 /** Gives up walking to something after this long (seconds). */
 const APPROACH_TIMEOUT = 12;
 
@@ -116,11 +166,20 @@ export class Tomatoshi {
   /** Progress of a "use" activity: walking there, then doing it. */
   private using = { phase: "approach" as "approach" | "act", time: 0, done: false };
   private lastLight: number | null = null;
+  private needs: Needs;
+  // Stem posture follows mood: perky, normal, spiky or droopy.
+  private stemPose = { sx: 1, sy: 1, dy: 0 };
 
   private readonly area: Area;
   private readonly room: Surroundings;
   private readonly rng: Rng;
   private readonly onReaction: (reaction: Reaction) => void;
+
+  private reacted(reaction: Reaction): void {
+    const effect = REACTION_EFFECTS[reaction];
+    if (effect) this.needs = applyEffect(this.needs, effect);
+    this.onReaction(reaction);
+  }
 
   constructor(options: TomatoshiOptions) {
     this.area = options.area;
@@ -129,6 +188,7 @@ export class Tomatoshi {
     this.x = options.x;
     this.ground = options.y;
     this.onReaction = options.onReaction ?? (() => {});
+    this.needs = { ...(options.needs ?? DEFAULT_NEEDS) };
     this.blinkTimer = between(this.rng, 1, 4);
   }
 
@@ -140,6 +200,39 @@ export class Tomatoshi {
   /** Things can bump into it, unless it's being held or flying. */
   get solid(): boolean {
     return this.mode !== "held" && this.mode !== "thrown";
+  }
+
+  get mood(): Mood {
+    return moodOf(this.needs);
+  }
+
+  /** A copy of the current needs (0..100 each). */
+  get currentNeeds(): Needs {
+    return { ...this.needs };
+  }
+
+  save(): FriendSave {
+    return { needs: { ...this.needs }, x: this.x, y: this.ground };
+  }
+
+  /**
+   * Coming back after a while: it noticed. Not that it missed you.
+   * `fondness` is how it felt about you when you left.
+   */
+  greet(secondsAway: number, fondness = this.needs.affection): void {
+    if (secondsAway < 5 * 60) return;
+    if (fondness > 65) {
+      // A heart slips out before it remembers to be grumpy.
+      this.say("heart", 0.6);
+      this.queuedBubble = { symbol: "ellipsis", at: this.time + 0.6, duration: 1.4 };
+      this.react("secretlyHappy", 2);
+    } else if (fondness < 30) {
+      this.say("anger", 1.8);
+      this.react("annoyed", 1.6);
+    } else {
+      this.say("ellipsis", 1.6);
+      this.react("annoyed", 1.2);
+    }
   }
 
   get asleep(): boolean {
@@ -184,7 +277,7 @@ export class Tomatoshi {
         this.mode = "squished";
         this.squashTarget = 0.28;
         this.say("anger", 30);
-        this.onReaction("squished");
+        this.reacted("squished");
         break;
       case "longPressEnd":
         this.squashTarget = 0;
@@ -197,7 +290,7 @@ export class Tomatoshi {
         this.strokeAmount = 0;
         this.heartShown = false;
         this.say("ellipsis", 2);
-        this.onReaction("stroked");
+        this.reacted("stroked");
         break;
       case "stroke":
         this.stroked(g.distance);
@@ -230,11 +323,11 @@ export class Tomatoshi {
       this.shakeLeft = 0.6;
       this.bubble.hide();
       this.react("holdingLaugh", 0.9, () => this.react("annoyed", 0.6));
-      this.onReaction("tickled");
+      this.reacted("tickled");
     } else {
       this.say(this.rng() < 0.5 ? "exclaim" : "ellipsis", 1.3);
       this.react("annoyed", 1.1);
-      this.onReaction("tapped");
+      this.reacted("tapped");
     }
   }
 
@@ -243,7 +336,7 @@ export class Tomatoshi {
     this.hop(480);
     this.shakeLeft = 1.2;
     this.say("grawlix", 1.8);
-    this.onReaction("exploded");
+    this.reacted("exploded");
     this.react("furious", 1.5, () => this.stormOff(this.pointer.x));
   }
 
@@ -252,7 +345,7 @@ export class Tomatoshi {
     this.squashV += 2;
     this.say("anger", 1.3);
     this.react("annoyed", 1.2);
-    this.onReaction("stem-poked");
+    this.reacted("stem-poked");
   }
 
   private noticed(): void {
@@ -269,12 +362,14 @@ export class Tomatoshi {
     if (this.mode !== "stroked") return;
     this.strokeAmount += distance;
     this.squashV += distance * 0.004;
+    const diminishing = 1 - this.needs.affection / 120;
+    this.needs = applyEffect(this.needs, { affection: distance * STROKE_AFFECTION * diminishing });
     if (this.strokeAmount > STROKE_HEART && !this.heartShown) {
       // It slips out… and is immediately covered up.
       this.heartShown = true;
       this.say("heart", 0.6);
       this.queuedBubble = { symbol: "ellipsis", at: this.time + 0.6, duration: 1.6 };
-      this.onReaction("secretly-happy");
+      this.reacted("secretly-happy");
     } else if (!this.bubble.symbol && !this.queuedBubble) {
       this.say("ellipsis", 1.6);
     }
@@ -302,7 +397,7 @@ export class Tomatoshi {
     this.grab = { dx: grabX - this.x, dy: grabY - (this.ground - this.h), heldFor: 0, complained: false };
     this.squashV -= 4; // stretch as it's lifted
     this.say("exclaim", 1.2);
-    this.onReaction("picked-up");
+    this.reacted("picked-up");
   }
 
   private moveHeld(px: number, py: number): void {
@@ -331,7 +426,7 @@ export class Tomatoshi {
       this.vh = clamp(-vy, -1600, Math.sqrt(2 * GRAVITY * Math.max(0, rise)));
     }
     this.mode = "thrown";
-    this.onReaction(speed < THROW_SPEED ? "dropped" : "thrown");
+    this.reacted(speed < THROW_SPEED ? "dropped" : "thrown");
   }
 
   // -------------------------------------------------------------------------
@@ -372,14 +467,20 @@ export class Tomatoshi {
     const free = this.mode === "auto" && !this.asleep;
     switch (kind) {
       case "thrown":
-        // A moving ball is irresistible (it would never admit it).
-        if (free) {
+        if (!free) break;
+        if (this.needs.energy < 15) {
+          this.say("zzz", 1.4); // too tired to care
+        } else {
+          // A moving ball is irresistible (it would never admit it).
           this.say("exclaim", 0.9);
           this.startUse(propId, "kick", 0.7);
         }
         break;
       case "refilled":
-        if (free) {
+        if (!free) break;
+        if (this.needs.fullness > 85) {
+          this.say("ellipsis", 1.4); // not hungry, thanks
+        } else {
           this.say("exclaim", 0.9);
           this.startUse(propId, "eat", 2.6);
         }
@@ -404,7 +505,7 @@ export class Tomatoshi {
     this.squashV += 5;
     this.stemV += 500;
     this.shakeLeft = 0.3;
-    this.onReaction("bonked");
+    this.reacted("bonked");
     if (this.mode === "squished" || this.mode === "stroked") return;
     this.perch = null;
     this.say("grawlix", 1.5);
@@ -414,7 +515,7 @@ export class Tomatoshi {
 
   private wakeUp(mood: "angry" | "annoyed"): void {
     this.say("anger", 1.4);
-    this.onReaction("woke-up");
+    this.reacted("woke-up");
     this.react(mood, 1.3);
   }
 
@@ -448,7 +549,7 @@ export class Tomatoshi {
     if (this.throwSpeed >= DIZZY_SPEED) {
       this.bubble.hide();
       this.say("dizzy", 1.6);
-      this.onReaction("dizzy");
+      this.reacted("dizzy");
       this.react("dizzy", 1.8, () => {
         this.say("grawlix", 1.6);
         this.react("angry", 1.2, () => this.stormOff(this.x));
@@ -469,6 +570,7 @@ export class Tomatoshi {
     this.time += dt;
     this.idleFor += dt;
     this.lightChanged(this.room.light());
+    this.needs = decayNeeds(this.needs, dt, this.asleep ? "asleep" : this.perch ? "sitting" : "awake");
 
     switch (this.mode) {
       case "auto":
@@ -513,6 +615,7 @@ export class Tomatoshi {
         idleFor: this.idleFor,
         last: this.lastActivity,
         opportunities: this.room.opportunities(),
+        needs: this.needs,
         rng: this.rng,
       });
       this.activityTime = 0;
@@ -586,13 +689,15 @@ export class Tomatoshi {
     switch (a.action) {
       case "nap":
         if (u.time % 3.2 < dt) this.say("zzz", 2.4);
+        // Fully rested and it's light: wake up on its own.
+        if (this.needs.energy >= 98 && this.room.light() >= DARK) return true;
         break;
       case "eat":
         if (Math.floor(u.time * 7) !== Math.floor((u.time - dt) * 7)) this.squashV += 0.8; // chomp
         if (u.time >= 1.2 && !u.done) {
           u.done = true;
           this.room.use(a.propId, "eat", { x: this.x, y: this.ground });
-          this.onReaction("ate");
+          this.reacted("ate");
         }
         break;
       case "inspect":
@@ -600,7 +705,7 @@ export class Tomatoshi {
           // Empty. Whose fault is that?
           u.done = true;
           this.say("anger", 1.4);
-          this.onReaction("found-bowl-empty");
+          this.reacted("found-bowl-empty");
         }
         break;
     }
@@ -625,7 +730,7 @@ export class Tomatoshi {
         this.vh = Math.sqrt(2 * GRAVITY * (height + 40));
         if (a.action === "nap") {
           this.queuedBubble = { symbol: "zzz", at: this.time + 1, duration: 2.4 };
-          this.onReaction("fell-asleep");
+          this.reacted("fell-asleep");
         }
         break;
       }
@@ -633,7 +738,7 @@ export class Tomatoshi {
         this.room.use(a.propId, "kick", { x: this.x, y: this.ground });
         this.squashV += 3;
         this.vh = 220;
-        this.onReaction("kicked-ball");
+        this.reacted("kicked-ball");
         break;
     }
   }
@@ -648,7 +753,7 @@ export class Tomatoshi {
         break;
       case "sulk":
         this.say("ellipsis", 2);
-        this.onReaction("sulking");
+        this.reacted("sulking");
         break;
     }
   }
@@ -745,7 +850,7 @@ export class Tomatoshi {
           if (a.action === "eat") return Math.floor(this.using.time * 7) % 2 ? "chompOpen" : "chompShut";
           if (a.action === "inspect") return this.using.done ? "annoyed" : "sulky";
         }
-        return "grumpy";
+        return MOOD_EXPRESSION[this.mood];
       }
     }
   }
@@ -856,7 +961,17 @@ export class Tomatoshi {
     });
 
     const stemBase = BODY_CY - BODY_RY + 6;
-    p.stem.setAttribute("transform", `rotate(${this.stem.toFixed(1)} 0 ${stemBase})`);
+    const angry = this.mode === "react" && ["angry", "furious", "annoyed"].includes(this.reactExpression);
+    const pose = STEM_POSE[this.asleep ? "asleep" : angry ? "angry" : this.mood];
+    const sp = this.stemPose;
+    sp.sx = approach(sp.sx, pose.sx, 4, dt);
+    sp.sy = approach(sp.sy, pose.sy, 4, dt);
+    sp.dy = approach(sp.dy, pose.dy, 4, dt);
+    p.stem.setAttribute(
+      "transform",
+      `translate(0 ${sp.dy.toFixed(2)}) rotate(${this.stem.toFixed(1)} 0 ${stemBase}) ` +
+        `translate(0 ${stemBase}) scale(${sp.sx.toFixed(3)} ${sp.sy.toFixed(3)}) translate(0 ${-stemBase})`,
+    );
 
     const face = this.blinkLeft > 0 && this.face.eyes === "open" ? { ...this.face, lid: 1 } : this.face;
     renderFace(p, face);

@@ -11,11 +11,20 @@ export type WorldState = Record<string, ObjectState>;
 export class World {
   private state: WorldState = {};
 
-  constructor(private readonly events: EventBus<GameEvents>) {}
+  /** `saved` is state from a previous visit; it overrides initial values. */
+  constructor(
+    private readonly events: EventBus<GameEvents>,
+    private readonly saved: WorldState = {},
+  ) {}
 
   /** Register an object with its initial state (no events). */
   add(id: string, initial: ObjectState): void {
-    this.state[id] = { ...initial };
+    const state = { ...initial };
+    // Only keys the object still has: stale keys in old saves are dropped.
+    for (const [key, value] of Object.entries(this.saved[id] ?? {})) {
+      if (key in state && typeof value === typeof state[key]) state[key] = value;
+    }
+    this.state[id] = state;
   }
 
   get(id: string): Readonly<ObjectState> {

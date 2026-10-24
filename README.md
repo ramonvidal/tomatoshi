@@ -29,7 +29,26 @@ And the room:
 | Tap the window | Opens/closes the curtains. The sky follows the real time of day |
 | Tap the couch | Bounces the cushions, and whoever is sitting on them |
 
-Add `?hour=22` to the URL to see the room at a different time of day.
+### Its needs
+
+Tomatoshi has four needs that slowly drop: **energy**, **fun**, **fullness**
+and **affection**. They decide what it does (a hungry tomato heads for the
+bowl, a bored one goes for the ball, a tired one naps) and how it looks: its
+stem stands up when it's content, droops when it's tired or lonely, and
+bristles when it's angry. Stroking and attention raise affection; squishing,
+flinging and waking it up lower it.
+
+It remembers everything between visits. While you're away it rests, and
+gets a bit hungry and bored. When you come back after a while it lets you
+know how it feels about you.
+
+### URL options
+
+| Option | What it does |
+|---|---|
+| `?hour=22` | See the room at a different time of day |
+| `?debug` | Show its needs and mood |
+| `?reset` | Forget everything and start fresh |
 
 ## Development
 

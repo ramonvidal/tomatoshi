@@ -1,10 +1,11 @@
-// What Tomatoshi does when nobody is bothering it. Pure functions over an
-// injectable random source, so behavior is reproducible in tests.
-// M3 replaces the fixed weights with needs-driven utility scoring.
+// What Tomatoshi does when nobody is bothering it: utility scoring, where
+// what objects offer is weighed by how much it needs it right now. Pure
+// functions over an injectable random source, so behavior is reproducible.
 
 import type { Area } from "../engine/area";
 import { between, weighted, type Rng } from "../engine/random";
 import type { Opportunity, UseAction } from "../objects/prop";
+import { DEFAULT_NEEDS, moodOf, urgency, type NeedName, type Needs } from "./needs";
 
 export type { Area };
 
@@ -12,7 +13,7 @@ export type Activity =
   | { kind: "idle"; duration: number }
   | { kind: "lookAround"; duration: number }
   | { kind: "walk"; x: number; y: number }
-  | { kind: "mutter"; symbol: "ellipsis" | "anger" | "question"; duration: number }
+  | { kind: "mutter"; symbol: "ellipsis" | "anger" | "question" | "snack" | "zzz"; duration: number }
   | { kind: "glareAtYou"; duration: number }
   | { kind: "sulk"; duration: number }
   | { kind: "use"; propId: string; action: UseAction; duration: number };
@@ -28,7 +29,22 @@ export interface BrainContext {
   last: ActivityKind | null;
   /** What the room's objects offer right now. */
   opportunities: Opportunity[];
+  needs?: Needs;
   rng: Rng;
+}
+
+/** Which need each kind of object use satisfies. */
+export const NEED_FOR: Record<UseAction, NeedName> = {
+  eat: "fullness",
+  inspect: "fullness",
+  nap: "energy",
+  sit: "energy",
+  kick: "fun",
+};
+
+/** What objects offer, weighted by how much it needs each thing now. */
+export function weighOpportunities(opportunities: Opportunity[], needs: Needs): Opportunity[] {
+  return opportunities.map((o) => ({ ...o, weight: o.weight * urgency(needs[NEED_FOR[o.action]]) }));
 }
 
 /** Ignored this long (seconds), it starts sulking. */
@@ -38,16 +54,23 @@ export const MIN_WALK = 120;
 
 export function chooseActivity(ctx: BrainContext): Activity {
   const { rng } = ctx;
+  const needs = ctx.needs ?? DEFAULT_NEEDS;
+  const mood = moodOf(needs);
   const ignored = ctx.idleFor >= SULK_AFTER;
+  const lonely = mood === "lonely";
+  const opportunities = weighOpportunities(ctx.opportunities, needs);
 
-  const useWeight = ctx.opportunities.reduce((sum, o) => sum + Math.max(0, o.weight), 0);
+  const useWeight = opportunities.reduce((sum, o) => sum + Math.max(0, o.weight), 0);
+  // A pressing need leaves less time for standing around.
+  const pressing = mood === "hungry" || mood === "sleepy" || mood === "veryGrumpy" ? 0.5 : 1;
   const kind = weighted<ActivityKind>(rng, {
-    idle: 3,
-    lookAround: 2,
-    walk: ctx.last === "walk" ? 1.5 : 3,
-    mutter: 1,
-    glareAtYou: 1,
-    sulk: ignored && ctx.last !== "sulk" ? 6 : 0,
+    idle: 3 * pressing,
+    lookAround: 2 * pressing,
+    walk: (ctx.last === "walk" ? 1.5 : 3) * pressing,
+    mutter: mood === "hungry" || mood === "sleepy" ? 2.5 : 1,
+    // Lonely: stares at you, wanting attention it would never ask for.
+    glareAtYou: lonely ? 3 : 1,
+    sulk: (ignored || lonely) && ctx.last !== "sulk" ? 6 : 0,
     // Objects are more interesting than standing around, but not every time.
     use: ctx.last === "use" ? useWeight * 0.4 : useWeight,
   });
@@ -62,7 +85,12 @@ export function chooseActivity(ctx: BrainContext): Activity {
     case "mutter":
       return {
         kind,
-        symbol: weighted(rng, { ellipsis: 3, anger: 1, question: 1 }),
+        symbol:
+          mood === "hungry"
+            ? weighted(rng, { snack: 4, anger: 1 })
+            : mood === "sleepy"
+              ? weighted(rng, { zzz: 3, ellipsis: 1 })
+              : weighted(rng, { ellipsis: 3, anger: mood === "veryGrumpy" ? 3 : 1, question: 1 }),
         duration: between(rng, 1.4, 2.2),
       };
     case "glareAtYou":
@@ -70,8 +98,8 @@ export function chooseActivity(ctx: BrainContext): Activity {
     case "sulk":
       return { kind, duration: between(rng, 4, 7) };
     case "use": {
-      const options = Object.fromEntries(ctx.opportunities.map((o, i) => [String(i), o.weight]));
-      const o = ctx.opportunities[Number(weighted(rng, options))];
+      const options = Object.fromEntries(opportunities.map((o, i) => [String(i), o.weight]));
+      const o = opportunities[Number(weighted(rng, options))];
       return { kind, propId: o.propId, action: o.action, duration: useDuration(o.action, rng) };
     }
   }
