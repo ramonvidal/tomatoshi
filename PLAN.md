@@ -18,7 +18,7 @@ things around it. The world it lives in can change — we start in a
 | Game type | **Pure toy** for now, built so it can become a **puzzle game** later (see §6). |
 | Environments | Living room → **kitchen** → (later) more. |
 | Autonomy | **Alive in the space**: it roams, picks what to do and (from M5) moves between rooms on its own. |
-| Changing rooms | The view **stays put** and you watch Tomatoshi leave (and maybe peek back in). Tapping the door follows it into the next room. |
+| Changing rooms | The view **stays put** and you watch Tomatoshi leave (and maybe peek back in). Tapping the door follows it into the next room; tapping a door again takes you back, with or without it. |
 | Sound | **None for now.** Everything is readable visually; sound may come later. |
 
 ---
@@ -251,6 +251,8 @@ tomatoshi/
 
 **M5 — The kitchen**
 - Door/exit system + kitchen scene; Tomatoshi wanders between rooms by itself.
+- The view stays in the current room; tapping a door moves the view through it
+  (following Tomatoshi, or going back without it).
 - Kitchen objects (knife block, fridge, sink, stove, salad bowl).
 - Tomatoshi remembers which room it's in.
 
@@ -262,5 +264,4 @@ tomatoshi/
 
 ## 9. Open questions
 
-- When you follow Tomatoshi into another room, can you also go back on your
-  own (tap the door again), leaving it there?
+- None right now.
