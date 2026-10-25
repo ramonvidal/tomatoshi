@@ -23,7 +23,9 @@ export type UseAction =
   | "dance"
   | "leave"
   | "bathe"
-  | "grumble";
+  | "grumble"
+  | "play"
+  | "chase";
 
 /** Something Tomatoshi could choose to do, and how much it feels like it. */
 export interface Opportunity {
@@ -46,7 +48,13 @@ export type PropEventKind =
   | "door"
   | "splashed"
   | "rattled"
-  | "onion";
+  | "onion"
+  | "bumped"
+  | "tossed"
+  | "opened"
+  | "swung"
+  | "landed"
+  | "shooed";
 
 export interface Point {
   x: number;
@@ -61,6 +69,12 @@ export interface FriendView {
   readonly depthScale: number;
   /** False while held or flying: things pass by instead of bonking it. */
   readonly solid: boolean;
+  /** The room it's in. */
+  readonly room: { readonly id: string };
+  /** The tip of its stem (where a butterfly would land). */
+  readonly headTop: Point;
+  /** Standing still, not doing anything in particular. */
+  readonly idle: boolean;
 }
 
 export interface PropContext {
@@ -69,6 +83,8 @@ export interface PropContext {
   rng: Rng;
   /** Where Tomatoshi can walk. */
   area: Area;
+  /** The room this prop is in. */
+  roomId: string;
   friend: () => FriendView;
   /** Hour of the day, 0..24. */
   hour: () => number;
@@ -84,7 +100,7 @@ export interface LightSource {
 }
 
 /** Why Tomatoshi keeps away from something. */
-export type DangerKind = "sharp" | "hot" | "cold" | "offensive" | "onion";
+export type DangerKind = "sharp" | "hot" | "cold" | "offensive" | "onion" | "scary" | "wet";
 
 /** A zone on the floor (center and radius) it would rather avoid. */
 export interface Danger {
@@ -103,13 +119,18 @@ export interface PropDef {
   /** Optional size, for props that come in different sizes (e.g. windows). */
   w?: number;
   h?: number;
+  /** Optional look, for props with variants (e.g. a radio on a shelf or on the TV). */
+  variant?: string;
   state?: ObjectState;
 }
 
 export interface Prop {
   readonly id: string;
-  /** Wall props sit behind everything; world props are depth-sorted with Tomatoshi. */
-  readonly layer: "wall" | "world";
+  /**
+   * Sky props are behind the backdrop (outdoors), wall props are on the
+   * backdrop, world props are depth-sorted with Tomatoshi.
+   */
+  readonly layer: "sky" | "wall" | "world";
   readonly root: SVGGElement;
   readonly shadow?: SVGElement;
   /** Depth: the y where it touches the floor. */
@@ -137,6 +158,10 @@ export interface Prop {
   doorTo?(): string | null;
   /** For doors: Tomatoshi peeks back in from the other side. */
   peek?(): void;
+  /** Dropped here (body center on screen), Tomatoshi does this. */
+  catchDrop?(p: Point): UseAction | null;
+  /** How the seat moves right now (a swinging hammock). */
+  seatMotion?(): { dx: number; rot: number };
 }
 
 export type PropFactory = (def: PropDef, ctx: PropContext) => Prop;
@@ -146,6 +171,9 @@ export function tagProp(root: SVGGElement, id: string, type: string): void {
   root.dataset.prop = id;
   root.classList.add("prop", `prop-${type}`);
 }
+
+/** Is a point inside a box (left, top, right, bottom)? */
+export const inBox = (p: Point, l: number, t: number, r: number, b: number) => p.x >= l && p.x <= r && p.y >= t && p.y <= b;
 
 export const emitProp = (ctx: PropContext, id: string, kind: PropEventKind) =>
   ctx.events.emit("prop.event", { id, kind });

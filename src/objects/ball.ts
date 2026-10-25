@@ -100,9 +100,21 @@ export const createBall: PropFactory = (def, ctx) => {
     ctx.world.set(def.id, { resting: false });
   };
 
-  /** Bonk Tomatoshi if the ball flies into it. */
+  /** Bonk Tomatoshi if the ball flies into it, or falls on its head. */
   const checkFriend = () => {
     const f = ctx.friend();
+    if (f.room.id !== ctx.roomId) return; // it's in another room
+    if (f.solid && bonkCooldown <= 0 && body.vh < -200) {
+      // Falling onto its head (as it looks on screen): boing.
+      const top = f.headTop;
+      const ballY = body.y - body.h;
+      if (body.h > 0 && Math.abs(body.x - f.x) < 70 * f.depthScale && ballY > top.y && ballY < top.y + 80) {
+        body = { ...body, vh: Math.abs(body.vh) * 0.7, vx: body.vx + (body.x >= f.x ? 160 : -160) };
+        bonkCooldown = 0.6;
+        emitProp(ctx, def.id, "hit-friend");
+        return;
+      }
+    }
     if (!f.solid || bonkCooldown > 0 || Math.hypot(body.vx, body.vy) < BONK_SPEED) return;
     const dx = body.x - f.x;
     const dy = body.y - f.ground;

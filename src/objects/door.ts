@@ -14,6 +14,15 @@ const OPEN_TIME = 1.4;
 
 /** A small sign above the door hints at what's on the other side. */
 function sign(to: string): SVGElement[] {
+  if (to === "garden") {
+    // A flower.
+    return [
+      ...[0, 72, 144, 216, 288].map((a) =>
+        svgEl("circle", { cx: Math.cos((a * Math.PI) / 180) * 8, cy: Math.sin((a * Math.PI) / 180) * 8 - 2, r: 6, fill: c.curtain }),
+      ),
+      svgEl("circle", { cx: 0, cy: -2, r: 5, fill: c.sun }),
+    ];
+  }
   if (to === "kitchen") {
     // A cooking pot.
     return [

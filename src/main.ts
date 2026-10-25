@@ -67,6 +67,7 @@ const friend = new Tomatoshi({
   // Its particles go to whichever room it's in.
   fx: (kind, x, y, count) => house.room(friend.room.id).fx(kind, x, y, count),
   travel: (doorId) => house.friendLeft(friend.room.id, doorId),
+  routeTo: (from, to) => house.routeTo(from, to),
   rng,
   onReaction: (reaction) => events.emit("friend.reaction", { reaction }),
 });

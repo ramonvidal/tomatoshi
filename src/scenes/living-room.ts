@@ -16,15 +16,19 @@ export const livingRoom: SceneDef = {
   walkArea: { minX: 120, maxX: 600, minY: 900, maxY: 1200 },
   start: { x: 360, y: 1060 },
   objects: [
-    { id: "window", type: "window", x: 335, y: 200, state: { curtainsOpen: true } },
-    { id: "couch", type: "couch", x: 180, y: 840 },
-    { id: "lamp", type: "lamp", x: 368, y: 872, state: { on: false } },
+    // Back wall, left to right: garden door, lamp, couch under the window,
+    // the cousin plant, kitchen door.
+    { id: "door-garden", type: "door", x: 62, y: FLOOR_Y, state: { to: "garden", locked: false } },
+    { id: "lamp", type: "lamp", x: 178, y: 872, state: { on: false } },
+    { id: "window", type: "window", x: 228, y: 200, state: { curtainsOpen: true } },
+    { id: "couch", type: "couch", x: 360, y: 840 },
+    { id: "plant", type: "plant", x: 566, y: 866, state: { water: 80 } },
+    { id: "door-kitchen", type: "door", x: 662, y: FLOOR_Y, state: { to: "kitchen", locked: false } },
+    // Floor.
     { id: "ball", type: "ball", x: 470, y: 1120 },
     { id: "bowl", type: "bowl", x: 610, y: 1196, state: { food: 2 } },
-    { id: "radio", type: "radio", x: 170, y: 520, state: { on: false } },
     { id: "tv", type: "tv", x: 72, y: 1238, state: { channel: 0 } },
-    { id: "plant", type: "plant", x: 498, y: 864, state: { water: 80 } },
-    { id: "door-kitchen", type: "door", x: 662, y: FLOOR_Y, state: { to: "kitchen", locked: false } },
+    { id: "radio", type: "radio", x: 72, y: 1098, variant: "tabletop", state: { on: false } },
   ],
   triggers: [],
 };

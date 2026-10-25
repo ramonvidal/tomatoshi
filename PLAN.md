@@ -271,6 +271,21 @@ tomatoshi/
   leaves when what it needs isn't in this room; sometimes peeks back in.
 - Tomatoshi remembers which room it's in.
 
+**M6 — Livelier reactions and the garden** ✅
+- It notices what you do with objects in its room and reacts by object,
+  action and mood (squints at lights, perks up at music, sweats at the stove,
+  rushes to an opened fridge when hungry, grateful when its cousins get
+  watered, woken by noise). Fiddling with the same thing gets it annoyed,
+  then furious.
+- Double-tap the floor to call it over (it refuses when upset with you).
+- Drop it onto things: couch (sits), sink (bath), hammock, bowl (eats),
+  plant (visits). Drop the ball on its head: boing.
+- Garden through a back door in the living room: live sky with moving
+  sun/moon and clouds, hammock (naps, you can swing it), sprinkler (plays in
+  it, pretends to hate it), butterflies that land on its stem (fireflies at
+  night), tomato plants, a compost bin it's horrified by.
+- Finds its way to you across rooms (kitchen → living room → garden).
+
 **Later — Puzzle mode**
 - Activate scene triggers, goals and conditional exits.
 - Carryable/combinable items.

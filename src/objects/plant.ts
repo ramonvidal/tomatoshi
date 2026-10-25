@@ -3,7 +3,7 @@
 
 import { svgEl } from "../engine/stage";
 import { palette as c } from "../palette";
-import { emitProp, tagProp, type Prop, type PropFactory } from "./prop";
+import { emitProp, inBox, tagProp, type Prop, type PropFactory } from "./prop";
 
 /** Water lost per minute. Dry in about 40 minutes. */
 const DRY_RATE = 2.5;
@@ -100,6 +100,7 @@ export const createPlant: PropFactory = (def, ctx) => {
     opportunities: () => [{ propId: def.id, action: "visit", weight: 0.8 }],
     spot: (action) => (action === "visit" ? { x: def.x, y: Math.max(ctx.area.minY + 10, def.y + 50) } : null),
     focus: () => ({ x: def.x, y: def.y - 150 }),
+    catchDrop: (p) => (inBox(p, def.x - 70, def.y - 280, def.x + 70, def.y) ? "visit" : null),
   };
   return prop;
 };

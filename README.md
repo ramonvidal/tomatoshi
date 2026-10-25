@@ -18,6 +18,15 @@ See [PLAN.md](./PLAN.md) for the design, decisions and milestones.
 | Drag it | Picked up, legs kicking; drop it anywhere on the floor |
 | Fling it | Flies, bounces, rolls, gets dizzy, then furious |
 | Leave it alone | Wanders, mutters, glares at you; sulks if ignored too long |
+| Double-tap the floor | It comes over, grudgingly, and glares at you. If it's upset with you, it refuses |
+| Drop it onto something | On the couch or hammock it sits, in the sink it bathes, on the bowl it eats, by the plant it visits |
+| Drop the ball on its head | Boing. It is not amused |
+
+It watches what you do with everything in its room and has an opinion: it
+squints when the lights come on, perks up at music, sweats when the stove is
+lit, rushes over when you open the fridge (if it's hungry), and is quietly
+grateful when you water its cousins. Noise wakes it. Fiddle with the same
+thing over and over and it gets fed up.
 
 And the room:
 
@@ -49,6 +58,20 @@ back in after leaving. Tap the kitchen door to go back.
 | Tap the ceiling light | Light on/off |
 
 It won't go near the knives or the salad bowl (it has tomato slices in it).
+
+### The garden
+
+Out the back door of the living room (the door with the flower sign).
+
+| Do this | It does this |
+|---|---|
+| Tap the hammock | Swings it. If Tomatoshi is napping in it, it gets flustered |
+| Tap the sprinkler | Water! It says it hates getting wet, then hops around in it anyway |
+| Tap a butterfly | It flutters off. Butterflies like to land on Tomatoshi's stem, and it doesn't know what to do about it |
+| Tap the plants | Waters more cousins |
+| Tap the compost bin | Opens the lid. Tomatoshi finds this horrifying |
+
+The sky follows the real time of day; at night the butterflies are fireflies.
 
 ### Its needs
 

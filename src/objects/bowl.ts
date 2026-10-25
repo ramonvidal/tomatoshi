@@ -4,7 +4,7 @@
 import { Spring } from "../engine/spring";
 import { svgEl } from "../engine/stage";
 import { palette as c } from "../palette";
-import { emitProp, tagProp, type Prop, type PropFactory } from "./prop";
+import { emitProp, inBox, tagProp, type Prop, type PropFactory } from "./prop";
 
 export const MAX_FOOD = 3;
 /** Where Tomatoshi stands to eat, relative to the bowl. */
@@ -66,6 +66,8 @@ export const createBowl: PropFactory = (def, ctx) => {
       if (food() < MAX_FOOD) {
         ctx.world.set(def.id, { food: MAX_FOOD });
         emitProp(ctx, def.id, "refilled");
+      } else {
+        emitProp(ctx, def.id, "bumped");
       }
     },
     opportunities: () => [
@@ -82,6 +84,7 @@ export const createBowl: PropFactory = (def, ctx) => {
       if (left === 0) emitProp(ctx, def.id, "emptied");
     },
     focus: () => ({ x: def.x, y: def.y - 40 }),
+    catchDrop: (p) => (inBox(p, def.x - 90, def.y - 190, def.x + 90, def.y) ? (food() > 0 ? "eat" : "inspect") : null),
   };
   return prop;
 };

@@ -3,7 +3,7 @@
 import { Spring } from "../engine/spring";
 import { svgEl } from "../engine/stage";
 import { palette as c } from "../palette";
-import { tagProp, type Prop, type PropFactory } from "./prop";
+import { emitProp, tagProp, type Prop, type PropFactory } from "./prop";
 
 export const createSalad: PropFactory = (def, ctx) => {
   ctx.world.add(def.id, { ...def.state });
@@ -36,7 +36,9 @@ export const createSalad: PropFactory = (def, ctx) => {
       salad.setAttribute("transform", `translate(0 ${(-Math.max(0, toss.update(dt)) * 14).toFixed(1)})`);
     },
     handle(g) {
-      if (g.type === "tap") toss.kick(4);
+      if (g.type !== "tap") return;
+      toss.kick(4);
+      emitProp(ctx, def.id, "tossed");
     },
     danger: () => ({ x: def.x, y: ctx.area.minY, radius: 75, kind: "offensive" }),
   };

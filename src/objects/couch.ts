@@ -4,7 +4,7 @@
 import { Spring } from "../engine/spring";
 import { svgEl } from "../engine/stage";
 import { palette as c } from "../palette";
-import { DARK, emitProp, tagProp, type Prop, type PropFactory } from "./prop";
+import { DARK, emitProp, inBox, tagProp, type Prop, type PropFactory } from "./prop";
 
 /** Distance in front of the couch where Tomatoshi stands before hopping up. */
 const FRONT = 65;
@@ -55,6 +55,7 @@ export const createCouch: PropFactory = (def, ctx) => {
       return { x: Math.min(def.x + 60, Math.max(def.x - 60, from.x)), y: def.y + FRONT };
     },
     seatHeight: () => SEAT,
+    catchDrop: (p) => (inBox(p, def.x - 150, def.y - 280, def.x + 150, def.y - 30) ? "sit" : null),
   };
   return prop;
 };

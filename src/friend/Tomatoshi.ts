@@ -13,7 +13,9 @@ import { inDanger, type Surroundings } from "../engine/room";
 import { THIRSTY } from "../objects/plant";
 import { DARK, type DangerKind, type Opportunity, type Point, type PropEventKind, type UseAction } from "../objects/prop";
 import { CHANNEL } from "../objects/tv";
+import { clampToArea } from "../engine/area";
 import { BODY_CY, BODY_RX, BODY_RY, drawTomatoshi, HEAD_TOP, renderFace, type FaceState } from "./art";
+import { spamLevel, witness, type Witness } from "./witness";
 import { blendFace, expressions, type ExpressionName } from "./expressions";
 import { SpeechBubble, type BubbleSymbol } from "./bubbles";
 import { awayFrom, chooseActivity, useDuration, type Activity, type ActivityKind, type Area } from "./brain";
@@ -47,7 +49,15 @@ export type Reaction =
   | "too-cold"
   | "offended"
   | "cried"
-  | "came-looking";
+  | "came-looking"
+  | "came-when-called"
+  | "refused"
+  | "shook-off-butterfly"
+  | "chased"
+  | "got-wet"
+  | "played"
+  | "fed-up"
+  | "dropped-on";
 
 /** How each reaction changes its needs. Rough handling costs affection. */
 const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
@@ -72,9 +82,17 @@ const REACTION_EFFECTS: Partial<Record<Reaction, Partial<Needs>>> = {
   "too-hot": { affection: -1 },
   offended: { affection: -1 },
   cried: { affection: -2 },
+  "came-when-called": { affection: 1 },
+  "shook-off-butterfly": { fun: 4 },
+  chased: { fun: 10, energy: -2 },
+  "got-wet": { fun: 3 },
+  played: { fun: 6 },
+  "fed-up": { affection: -3 },
 };
+/** Kinds of event that come from its own doings, not yours. */
+const OWN_EVENTS = new Set<PropEventKind>(["kicked", "emptied", "hit-friend", "landed", "shooed"]);
 /** Fun per second from things it enjoys (and would deny enjoying). */
-const FUN_RATE = { dance: 2, tv: 1.2, staticTv: 0.3, bath: 1.8 };
+const FUN_RATE = { dance: 2, tv: 1.2, staticTv: 0.3, bath: 1.8, sprinkler: 3 };
 /** Door weights: a little curiosity, more when it misses you or needs something not found here. */
 const DOOR_CURIOSITY = 0.25;
 const DOOR_MISSING_YOU = 2.5;
@@ -103,6 +121,8 @@ export interface TomatoshiOptions {
   room: Surroundings;
   /** Called when it walks out through a door. */
   travel?: (doorId: string) => void;
+  /** The next room on the way from one room to another (to come find you). */
+  routeTo?: (from: string, to: string) => string | null;
   needs?: Needs;
   /** Where to spawn particle effects. */
   fx?: Effects;
@@ -219,7 +239,18 @@ export class Tomatoshi {
   private apartFor = 0;
   private viewer = "";
   private dangerSeen = new Map<string, number>();
+  /** Something it's looking at for a moment (an object you just used). */
+  private attention: { x: number; y: number; until: number } | null = null;
+  /** When each object was last fiddled with, to get fed up with it. */
+  private fiddled = new Map<string, number[]>();
+  /** Called over by a double tap: glares at you when it gets there. */
+  private summoned = false;
+  /** Dropped near something: does it once it has landed. */
+  private pendingUse: { propId: string; action: UseAction } | null = null;
+  /** A butterfly sitting on its stem. */
+  private butterfly: string | null = null;
   private readonly travel: (doorId: string) => void;
+  private readonly routeTo: (from: string, to: string) => string | null;
   private readonly rng: Rng;
   private readonly onReaction: (reaction: Reaction) => void;
 
@@ -251,6 +282,7 @@ export class Tomatoshi {
   constructor(options: TomatoshiOptions) {
     this.room = options.room;
     this.travel = options.travel ?? (() => {});
+    this.routeTo = options.routeTo ?? ((_from, to) => to);
     this.viewer = options.room.id;
     this.rng = options.rng;
     this.x = options.x;
@@ -309,6 +341,16 @@ export class Tomatoshi {
   /** Stage units per body unit at the current depth (further away = smaller). */
   get depthScale(): number {
     return depthScale(this.area, this.ground);
+  }
+
+  /** The tip of its stem. */
+  get headTop(): Point {
+    return { x: this.x, y: this.ground - this.h - this.bounce + HEAD_TOP * this.depthScale };
+  }
+
+  /** Keeping still (standing, sitting or asleep): a butterfly could land. */
+  get idle(): boolean {
+    return this.mode === "auto" && this.bounce === 0 && this.h <= this.floorLevel + 1 && this.presence === 1 && !this.dancing;
   }
 
   /** Things can bump into it, unless it's being held or flying. */
@@ -406,7 +448,10 @@ export class Tomatoshi {
 
     switch (g.type) {
       case "tap":
-        if (g.target === "none") this.noticed();
+        if (g.target === "none") {
+          if (g.count === 2) this.comeHere(g.x, g.y);
+          else this.noticed(g.x, g.y);
+        }
         else if (g.target === "stem") this.stemPoked();
         else this.tapped(g.count);
         break;
@@ -485,14 +530,35 @@ export class Tomatoshi {
     this.reacted("stem-poked");
   }
 
-  private noticed(): void {
+  private noticed(x: number, y: number): void {
     if (this.mode !== "auto" || this.asleep) return;
+    this.attention = { x, y, until: this.time + 1.2 };
     if (this.activity?.kind === "sulk") {
       this.react("annoyed", 1);
       this.say("ellipsis", 1.2);
     } else if (this.rng() < 0.35) {
       this.say("question", 1.2);
     }
+  }
+
+  /** Double tap on the floor: come here. It comes, grudgingly. Or not at all. */
+  private comeHere(x: number, y: number): void {
+    if (this.asleep || this.mode === "held" || this.mode === "thrown") return;
+    if (y < this.area.minY - 60) return; // that's the wall
+    if (this.needs.affection < 30) {
+      this.say("anger", 1.4); // no.
+      this.reacted("refused");
+      this.react("sulky", 1.6);
+      return;
+    }
+    const target = clampToArea(this.area, x, y);
+    this.say("ellipsis", 1.2);
+    this.mode = "auto";
+    this.storming = false;
+    this.activity = { kind: "walk", ...target };
+    this.activityTime = 0;
+    this.summoned = true;
+    this.reacted("came-when-called");
   }
 
   private stroked(distance: number): void {
@@ -529,6 +595,7 @@ export class Tomatoshi {
     this.mode = "held";
     this.activity = null;
     this.perch = null;
+    this.pendingUse = null;
     this.vx = 0;
     this.vh = 0;
     this.grab = { dx: grabX - this.x, dy: grabY - (this.ground - this.h), heldFor: 0, complained: false };
@@ -553,6 +620,7 @@ export class Tomatoshi {
   private released(vx: number, vy: number): void {
     const speed = Math.hypot(vx, vy);
     this.throwSpeed = speed;
+    if (speed < THROW_SPEED && this.droppedOnto()) return;
     if (speed < THROW_SPEED) {
       this.vx = 0;
       this.vh = 0;
@@ -564,6 +632,34 @@ export class Tomatoshi {
     }
     this.mode = "thrown";
     this.reacted(speed < THROW_SPEED ? "dropped" : "thrown");
+  }
+
+  /** Put down on top of something: sit on it, bathe in it, or go and use it. */
+  private droppedOnto(): boolean {
+    const b = this.bounds;
+    const target = this.room.dropTarget({ x: b.cx, y: b.cy });
+    if (!target) return false;
+    const { propId, action } = target;
+    this.reacted("dropped-on");
+    if (action === "sit" || action === "nap" || action === "bathe") {
+      const spot = this.room.spot(propId, action, { x: this.x, y: this.ground });
+      if (!spot) return false;
+      // Keep it where it is on screen, then let it settle onto the seat.
+      const feetY = this.ground - this.h;
+      const seat = this.room.seatHeight(propId);
+      this.x = spot.x;
+      this.ground = spot.y;
+      this.perch = { propId, height: seat };
+      this.h = Math.max(seat, spot.y - feetY);
+      this.vh = 0;
+      this.vx = 0;
+      this.startUse(propId, action, useDuration(action, this.rng));
+      this.say(action === "bathe" ? "exclaim" : "ellipsis", 1.2);
+      return true;
+    }
+    // Anything else: land first, then (grudgingly) get on with it.
+    this.pendingUse = target;
+    return false;
   }
 
   // -------------------------------------------------------------------------
@@ -602,6 +698,12 @@ export class Tomatoshi {
   /** Something happened to an object in the room. */
   notice(propId: string, kind: PropEventKind): void {
     const free = this.mode === "auto" && !this.asleep;
+    if (!OWN_EVENTS.has(kind)) {
+      // Whatever you did, it looks over.
+      const focus = this.room.focus(propId);
+      if (focus && !this.asleep) this.attention = { ...focus, until: this.time + 1.6 };
+      if (this.fedUp(propId)) return;
+    }
     switch (kind) {
       case "thrown":
         if (!free) break;
@@ -630,7 +732,7 @@ export class Tomatoshi {
             this.say("anger", 1.2);
             this.react("annoyed", 1.1);
           }
-        }
+        } else this.witnessed(propId, kind);
         break;
       case "hit-friend":
         this.bonked(propId);
@@ -639,7 +741,7 @@ export class Tomatoshi {
         if (this.bathing && this.perch?.propId === propId) {
           this.squashV += 3;
           this.say("anger", 1.1); // hey!
-        }
+        } else this.witnessed(propId, kind);
         break;
       case "rattled":
         // The knives. Rattling. On purpose.
@@ -653,8 +755,95 @@ export class Tomatoshi {
       case "channel":
         // A cooking show. With knives. Absolutely not.
         if (this.room.state(propId)?.channel === CHANNEL.cooking && !this.asleep && this.solid) this.scared(propId);
+        else this.witnessed(propId, kind);
         break;
+      case "landed":
+        this.butterflyLanded(propId);
+        break;
+      case "kicked":
+      case "emptied":
+      case "hit-friend":
+      case "shooed":
+        break;
+      default:
+        this.witnessed(propId, kind);
     }
+  }
+
+  /** Fiddling with the same thing over and over: it gets fed up. */
+  private fedUp(propId: string): boolean {
+    const times = [...(this.fiddled.get(propId) ?? []), this.time].filter((t) => this.time - t < 4);
+    this.fiddled.set(propId, times);
+    if (this.asleep || !this.solid) return false;
+    const level = spamLevel(times, this.time);
+    if (level === "furious" && times.length === 7) {
+      this.say("grawlix", 1.6);
+      this.reacted("fed-up");
+      const from = this.room.focus(propId)?.x ?? this.x;
+      this.react("furious", 1.3, () => this.stormOff(from));
+      return true;
+    }
+    if (level === "annoyed" && times.length === 4) {
+      this.say("anger", 1.4); // stop that
+      this.react("annoyed", 1.2);
+      return true;
+    }
+    return level !== "none"; // already said its piece
+  }
+
+  /** React to you using an object in its room. */
+  private witnessed(propId: string, kind: PropEventKind): void {
+    const type = this.room.typeOf(propId);
+    if (!type) return;
+    const a = this.activity;
+    const usingThis = this.mode === "auto" && a?.kind === "use" && a.propId === propId ? a.action : null;
+    const w = witness({
+      type,
+      kind,
+      state: this.room.state(propId),
+      needs: this.needs,
+      mood: this.mood,
+      asleep: this.asleep,
+      usingThis,
+      perchedHere: this.perch?.propId === propId,
+    });
+    if (w) this.act(w, propId, usingThis !== null);
+  }
+
+  private act(w: Witness, propId: string, aboutWhatItsDoing: boolean): void {
+    if (w.wake) {
+      if (this.asleep) this.wakeUp("annoyed");
+      return;
+    }
+    if (w.affection || w.fun) this.needs = applyEffect(this.needs, { affection: w.affection ?? 0, fun: w.fun ?? 0 });
+    if (w.sweat) this.burst("sweat", 3);
+    if (w.shiver) this.shakeLeft = 0.7;
+    if (w.hearts) this.burst("heart", w.hearts);
+    if (w.say) this.say(w.say, 1.3);
+    if (this.mode !== "auto") return; // busy being held, stroked, etc.: a bubble is all
+    if (w.go) {
+      this.startUse(propId, w.go, useDuration(w.go, this.rng));
+      return;
+    }
+    // Doing something else with its hands full: just a look and a bubble.
+    const busy = this.activity?.kind === "use" && this.using.phase === "act" && !aboutWhatItsDoing;
+    if (w.express && !busy) this.react(w.express, w.seconds ?? 1);
+  }
+
+  /** A butterfly landed on its stem. It freezes, goes cross-eyed, blushes… then shoos it. */
+  private butterflyLanded(propId: string): void {
+    if (this.asleep || this.mode !== "auto") return; // it'll fly off on its own
+    this.butterfly = propId;
+    this.say("ellipsis", 1.6);
+    this.react("flustered", 2.6, () => {
+      this.shakeLeft = 0.5;
+      this.stemV += 500;
+      this.room.use(propId, "chase", { x: this.x, y: this.ground });
+      this.butterfly = null;
+      this.say("anger", 1);
+      this.reacted("shook-off-butterfly");
+      this.react("annoyed", 0.8);
+    });
   }
 
   /** Wandered too close to something unpleasant. */
@@ -681,6 +870,17 @@ export class Tomatoshi {
         this.say("anger", 1.4);
         this.reacted("offended");
         this.react("angry", 1.1, () => this.stormOff(fromX));
+        return;
+      case "scary":
+        this.scared(propId);
+        return;
+      case "wet":
+        // Shakes it off… and doesn't hate it as much as it pretends.
+        this.shakeLeft = 0.6;
+        this.burst("drop", 4);
+        this.say("ellipsis", 1.2);
+        this.reacted("got-wet");
+        this.react("content", 1);
         return;
       case "onion":
         this.reacted("cried");
@@ -744,7 +944,7 @@ export class Tomatoshi {
     this.activity = { kind: "use", propId, action, duration };
     this.activityTime = 0;
     // Already sitting on it: no need to climb down and back up.
-    const settled = this.perch?.propId === propId && (action === "sit" || action === "nap");
+    const settled = this.perch?.propId === propId && (action === "sit" || action === "nap" || action === "bathe");
     this.using = { phase: settled ? "act" : "approach", time: 0, done: false };
   }
 
@@ -778,7 +978,10 @@ export class Tomatoshi {
       this.react("angry", 1.3);
     } else {
       this.say("ellipsis", 1.3);
-      this.react("annoyed", 1);
+      const next = this.pendingUse;
+      this.pendingUse = null;
+      if (next) this.react("annoyed", 0.6, () => this.startUse(next.propId, next.action, useDuration(next.action, this.rng)));
+      else this.react("annoyed", 1);
     }
   }
 
@@ -903,6 +1106,13 @@ export class Tomatoshi {
       this.lastActivity = a.kind;
       this.activity = null;
       this.storming = false;
+      if (this.summoned && a.kind === "walk") {
+        // Here. What do you want.
+        this.summoned = false;
+        this.activity = { kind: "glareAtYou", duration: 1.8 };
+        this.activityTime = 0;
+        this.say("ellipsis", 1.4);
+      }
     }
   }
 
@@ -918,7 +1128,8 @@ export class Tomatoshi {
     return opportunities.map((o) => {
       if (o.action !== "leave") return o;
       const to = this.room.state(o.propId)?.to;
-      const missesYou = to === this.viewer && this.apartFor > MISSES_YOU_AFTER;
+      const towardYou = this.viewer !== this.room.id ? this.routeTo(this.room.id, this.viewer) : null;
+      const missesYou = to === towardYou && this.apartFor > MISSES_YOU_AFTER;
       return { ...o, weight: DOOR_CURIOSITY + (missesYou ? DOOR_MISSING_YOU : 0) + (needUnmet ? DOOR_NEED : 0) };
     });
   }
@@ -954,7 +1165,7 @@ export class Tomatoshi {
     if (u.phase === "approach") {
       const spot = this.room.spot(a.propId, a.action, { x: this.x, y: this.ground });
       if (!spot || this.activityTime > APPROACH_TIMEOUT) return true;
-      const chasing = a.action === "kick";
+      const chasing = a.action === "kick" || a.action === "chase";
       if (!this.walkToward(spot, dt, chasing ? 1.6 : 1)) return false;
       u.phase = "act";
       u.time = 0;
@@ -1014,7 +1225,8 @@ export class Tomatoshi {
         this.presence = Math.max(0, 1 - u.time / DOOR_TIME);
         this.ground -= 50 * dt;
         if (u.time >= DOOR_TIME) {
-          this.arrivedFromLooking = this.room.state(a.propId)?.to === this.viewer && this.apartFor > MISSES_YOU_AFTER;
+          this.arrivedFromLooking =
+            this.room.state(a.propId)?.to === this.routeTo(this.room.id, this.viewer) && this.apartFor > MISSES_YOU_AFTER;
           this.travel(a.propId);
           return false; // `enter` has given it something new to do
         }
@@ -1025,6 +1237,31 @@ export class Tomatoshi {
           u.done = true;
           this.say("note", 1.4); // …this is actually nice
           this.reacted("bathed");
+        }
+        break;
+      case "play":
+        // Hopping around in the sprinkler. Grumpy at first.
+        if (this.room.state(a.propId)?.on === false) return true;
+        this.needs = applyEffect(this.needs, { fun: FUN_RATE.sprinkler * dt });
+        if (this.every(0.7) && this.h <= 0) {
+          this.vh = 280;
+          this.x = clamp(this.x + (this.rng() - 0.5) * 60, this.area.minX, this.area.maxX);
+          this.burst("drop", 2);
+        }
+        if (u.time > 2 && !u.done) {
+          u.done = true;
+          this.say("note", 1.4);
+          this.reacted("played");
+        }
+        break;
+      case "chase":
+        // Pounce! …and miss. Every time.
+        if (!u.done) {
+          u.done = true;
+          this.vh = 480;
+          this.room.use(a.propId, "chase", { x: this.x, y: this.ground });
+          this.reacted("chased");
+          this.queuedBubble = { symbol: "anger", at: this.time + 0.4, duration: 1.2 };
         }
         break;
       case "grumble":
@@ -1158,6 +1395,9 @@ export class Tomatoshi {
       }
     }
 
+    // Put down gently on the floor (or already rolled to a stop): done flying.
+    if (this.mode === "thrown" && this.h <= this.floorLevel && this.vh <= 0 && Math.abs(this.vx) < 60) this.landedFromThrow();
+
     // Settle back upright (to the nearest full turn) once not moving.
     if (this.mode !== "thrown" && !this.dancing) {
       const upright = Math.round(this.rot / 360) * 360;
@@ -1203,6 +1443,8 @@ export class Tomatoshi {
           if (a.action === "dance") return "dancing";
           if (a.action === "bathe") return this.using.time < 1.8 ? "annoyed" : "content";
           if (a.action === "grumble") return "annoyed";
+          if (a.action === "play") return this.using.time < 2 ? "annoyed" : "content";
+          if (a.action === "chase") return "angry";
           if (a.action === "visit") return this.bubble.symbol === "anger" ? "annoyed" : "content";
           if (a.action === "watch") return this.room.state(a.propId)?.channel === CHANNEL.static ? "annoyed" : "grumpy";
         }
@@ -1221,6 +1463,11 @@ export class Tomatoshi {
     if (this.mode === "stroked") return { x: towardPointer.x > 0 ? -0.9 : 0.9, y: 0.35 };
     if (this.mode === "react" && this.reactExpression === "dizzy") return { x: 0, y: 0 };
     if (this.asleep) return { x: 0, y: 0.3 };
+    if (this.butterfly) return { x: 0, y: -1 }; // cross-eyed at the thing on its head
+    const att = this.attention;
+    if (att && this.time < att.until) {
+      return { x: clamp((att.x - this.x) / 250, -1, 1), y: clamp((att.y - headY) / 350, -1, 1) };
+    }
     if (this.time - this.pointer.seenAt < POINTER_ATTENTION) return towardPointer;
 
     const a = this.activity;
@@ -1291,9 +1538,11 @@ export class Tomatoshi {
 
     // Going through a door: a little smaller and fading.
     const through = 0.85 + 0.15 * this.presence;
+    // Sitting on something that moves (a swinging hammock): move with it.
+    const seat = this.perch && this.h <= this.floorLevel + 1 ? this.room.seatMotion(this.perch.propId) : { dx: 0, rot: 0 };
     p.root.setAttribute(
       "transform",
-      `translate(${this.x.toFixed(1)} ${(this.ground - lift).toFixed(1)}) scale(${(s * through).toFixed(3)}) rotate(${this.rot.toFixed(1)} 0 ${BODY_CY})`,
+      `translate(${(this.x + seat.dx).toFixed(1)} ${(this.ground - lift).toFixed(1)}) scale(${(s * through).toFixed(3)}) rotate(${(this.rot + seat.rot).toFixed(1)} 0 ${BODY_CY})`,
     );
     p.root.setAttribute("opacity", this.presence.toFixed(3));
     p.shadow.setAttribute("opacity", this.presence.toFixed(3));

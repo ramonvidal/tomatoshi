@@ -3,7 +3,7 @@
 
 import { svgEl } from "../engine/stage";
 import { palette as c } from "../palette";
-import { emitProp, tagProp, type Prop, type PropFactory } from "./prop";
+import { emitProp, inBox, tagProp, type Prop, type PropFactory } from "./prop";
 
 /** How long the tap runs after being turned on. */
 const RUN_TIME = 3;
@@ -49,6 +49,7 @@ export const createSink: PropFactory = (def, ctx) => {
       if (action === "bathe") running = RUN_TIME;
     },
     focus: () => ({ x: def.x + 18, y: def.y - 50 }),
+    catchDrop: (p) => (inBox(p, def.x - 80, def.y - 170, def.x + 80, def.y + 30) ? "bathe" : null),
   };
   return prop;
 };

@@ -52,9 +52,15 @@ export interface Surroundings {
   state(propId: string): Readonly<ObjectState> | null;
   /** Places it would rather not be near right now. */
   dangers(): { propId: string; danger: Danger }[];
+  /** The kind of object (its type in the scene file). */
+  typeOf(propId: string): string | null;
+  /** The object Tomatoshi was dropped onto, and what it does there. */
+  dropTarget(p: Point): { propId: string; action: UseAction } | null;
+  /** How a seat is moving (hammock swing), to move with it. */
+  seatMotion(propId: string): { dx: number; rot: number };
 }
 
-export type RoomLayer = "background" | "wall" | "shadows" | "world" | "effects" | "lighting";
+export type RoomLayer = "sky" | "background" | "wall" | "shadows" | "world" | "effects" | "lighting";
 
 /** Darkness overlay color and how dark "no light at all" gets. */
 const NIGHT_TINT = "#141a3a";
@@ -86,13 +92,13 @@ export class Room implements Surroundings {
   constructor(
     readonly def: SceneDef,
     container: SVGGElement,
-    ctx: Omit<PropContext, "fx" | "area">,
+    ctx: Omit<PropContext, "fx" | "area" | "roomId">,
     factories: Record<string, PropFactory>,
     backdrops: Record<string, () => SVGGElement>,
   ) {
     this.world = ctx.world;
     this.root = svgEl("g", { class: `room room-${def.id}` });
-    for (const name of ["background", "wall", "shadows", "world", "effects", "lighting"] as const) {
+    for (const name of ["sky", "background", "wall", "shadows", "world", "effects", "lighting"] as const) {
       this.layers[name] = svgEl("g", { class: `layer layer-${name}` });
       this.root.appendChild(this.layers[name]);
     }
@@ -103,7 +109,7 @@ export class Room implements Surroundings {
     if (!backdrop) throw new Error(`Unknown backdrop: ${def.backdrop}`);
     this.layers.background.appendChild(backdrop());
 
-    const propCtx: PropContext = { ...ctx, area: def.walkArea, fx: this.particles.emit };
+    const propCtx: PropContext = { ...ctx, area: def.walkArea, roomId: def.id, fx: this.particles.emit };
     for (const propDef of def.objects) {
       const factory = factories[propDef.type];
       if (!factory) throw new Error(`Unknown prop type: ${propDef.type}`);
@@ -222,6 +228,22 @@ export class Room implements Surroundings {
 
   state(propId: string): Readonly<ObjectState> | null {
     return this.props.has(propId) ? this.world.get(propId) : null;
+  }
+
+  typeOf(propId: string): string | null {
+    return this.def.objects.find((o) => o.id === propId)?.type ?? null;
+  }
+
+  dropTarget(p: Point): { propId: string; action: UseAction } | null {
+    for (const [propId, prop] of this.props) {
+      const action = prop.catchDrop?.(p);
+      if (action) return { propId, action };
+    }
+    return null;
+  }
+
+  seatMotion(propId: string): { dx: number; rot: number } {
+    return this.props.get(propId)?.seatMotion?.() ?? { dx: 0, rot: 0 };
   }
 
   dangers(): { propId: string; danger: Danger }[] {

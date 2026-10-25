@@ -26,16 +26,20 @@ export const createRadio: PropFactory = (def, ctx) => {
     svgEl("rect", { x: -18, y: -48, width: 3, height: 14, fill: c.curtainDark }),
     light,
   ]);
-  const root = svgEl("g", { transform: `translate(${def.x} ${def.y})` }, [
-    // Shelf with two brackets, and a few books for company.
-    svgEl("rect", { x: -120, y: 0, width: 240, height: 12, rx: 4, fill: c.shelf }),
-    svgEl("path", { d: "M -90 12 L -90 34 L -70 12 Z", fill: c.shelfDark }),
-    svgEl("path", { d: "M 90 12 L 90 34 L 70 12 Z", fill: c.shelfDark }),
-    svgEl("rect", { x: 40, y: -58, width: 16, height: 58, rx: 2, fill: c.curtain }),
-    svgEl("rect", { x: 58, y: -50, width: 14, height: 50, rx: 2, fill: c.couch }),
-    svgEl("rect", { x: 74, y: -62, width: 18, height: 62, rx: 2, fill: c.lampShade, transform: "rotate(8 92 0)" }),
-    radio,
-  ]);
+  // On a wall shelf with a few books, or standing on something (the TV).
+  const onShelf = def.variant !== "tabletop";
+  const shelf = onShelf
+    ? [
+        svgEl("rect", { x: -120, y: 0, width: 240, height: 12, rx: 4, fill: c.shelf }),
+        svgEl("path", { d: "M -90 12 L -90 34 L -70 12 Z", fill: c.shelfDark }),
+        svgEl("path", { d: "M 90 12 L 90 34 L 70 12 Z", fill: c.shelfDark }),
+        svgEl("rect", { x: 40, y: -58, width: 16, height: 58, rx: 2, fill: c.curtain }),
+        svgEl("rect", { x: 58, y: -50, width: 14, height: 50, rx: 2, fill: c.couch }),
+        svgEl("rect", { x: 74, y: -62, width: 18, height: 62, rx: 2, fill: c.lampShade, transform: "rotate(8 92 0)" }),
+      ]
+    : [];
+  // Centered on its anchor when standing on something.
+  const root = svgEl("g", { transform: `translate(${def.x + (onShelf ? 0 : 44)} ${def.y})` }, [...shelf, radio]);
   tagProp(root, def.id, def.type);
 
   const thump = new Spring(300, 12);
@@ -43,11 +47,13 @@ export const createRadio: PropFactory = (def, ctx) => {
   let lastNote = 0;
   let time = 0;
 
+  const notesX = def.x + (onShelf ? 0 : 44) + SPEAKER.x;
   const prop: Prop = {
     id: def.id,
-    layer: "wall",
+    layer: onShelf ? "wall" : "world",
     root,
-    sortY: () => def.y,
+    // On the TV: drawn just after it (the TV is ~140 below the radio's base).
+    sortY: () => (onShelf ? def.y : def.y + 141),
     update(dt) {
       time += dt;
       const on = isOn();
@@ -60,7 +66,7 @@ export const createRadio: PropFactory = (def, ctx) => {
         }
         if (time - lastNote > 0.6) {
           lastNote = time;
-          ctx.fx("note", def.x + SPEAKER.x, def.y + SPEAKER.y - 20);
+          ctx.fx("note", notesX, def.y + SPEAKER.y - 20);
         }
       }
       const s = 1 + Math.max(0, thump.update(dt)) * 0.05;

@@ -26,7 +26,7 @@ export class House {
   constructor(
     stage: Stage,
     scenes: SceneDef[],
-    ctx: Omit<PropContext, "fx" | "area">,
+    ctx: Omit<PropContext, "fx" | "area" | "roomId">,
     factories: Record<string, PropFactory>,
     backdrops: Record<string, () => SVGGElement>,
     viewedId: string,
@@ -59,6 +59,15 @@ export class House {
     const room = this.rooms.get(id);
     if (!room) throw new Error(`Unknown room: ${id}`);
     return room;
+  }
+
+  /** The next room to go through on the way from one room to another (null if no way). */
+  routeTo(from: string, to: string): string | null {
+    const doors = new Map<string, string[]>();
+    for (const [id, room] of this.rooms) {
+      doors.set(id, [...room.props.values()].flatMap((p) => p.doorTo?.() ?? []));
+    }
+    return nextStep(doors, from, to);
   }
 
   /** Put Tomatoshi's body into the room it's in. */
@@ -160,4 +169,25 @@ export class House {
     room.layers.shadows.appendChild(friend.parts.shadow);
     room.layers.world.appendChild(friend.parts.root);
   }
+}
+
+/** Breadth-first search over doors: the first room to go to on the way. */
+export function nextStep(doors: Map<string, string[]>, from: string, to: string): string | null {
+  if (from === to) return null;
+  const cameFrom = new Map<string, string>([[from, from]]);
+  const queue = [from];
+  while (queue.length) {
+    const here = queue.shift()!;
+    for (const next of doors.get(here) ?? []) {
+      if (cameFrom.has(next) || !doors.has(next)) continue;
+      cameFrom.set(next, here);
+      if (next === to) {
+        let step = to;
+        while (cameFrom.get(step) !== from) step = cameFrom.get(step)!;
+        return step;
+      }
+      queue.push(next);
+    }
+  }
+  return null;
 }
